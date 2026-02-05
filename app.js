@@ -499,21 +499,52 @@ function loadAllRecords(user) {
     
     const fetchRecords = async () => {
         try {
+            // 1. Capture current selections before fetching/rendering to prevent clearing them
+            const getSelectedIds = (tbodyId) => {
+                const checked = document.querySelectorAll(`#${tbodyId} .export-check:checked`);
+                return Array.from(checked).map(cb => {
+                    try { return JSON.parse(decodeURIComponent(cb.value)).unique_id; } 
+                    catch(e) { return null; }
+                }).filter(id => id);
+            };
+
+            const activeSelected = getSelectedIds('activeTableBody');
+            const historySelected = getSelectedIds('historyTableBody');
+
+            // 2. Fetch Active Data
             let query = supabase.from('gate_passes').select('*').eq('status', 'OUT').order('time_out', { ascending: false }).limit(1000);
             if (!isAdmin) query = query.eq('issuer_email', user.email);
             const { data: aData, error: aError } = await query;
             if (aError) throw aError;
             if(aData) activeData = aData;
 
+            // 3. Fetch History Data
             let hQuery = supabase.from('gate_passes').select('*').eq('status', 'RETURNED').order('time_return', { ascending: false }).limit(1000);
             if (!isAdmin) hQuery = hQuery.eq('issuer_email', user.email);
             const { data: hData, error: hError } = await hQuery;
             if (hError) throw hError;
             if(hData) historyData = hData;
 
-            // Initially render both with empty search
+            // 4. Render Both Tables
             renderTable('active');
             renderTable('history');
+
+            // 5. Restore Selections (Check the boxes that were checked before refresh)
+            const restoreSelection = (tbodyId, ids) => {
+                if(!ids || !ids.length) return;
+                const checkboxes = document.querySelectorAll(`#${tbodyId} .export-check`);
+                checkboxes.forEach(cb => {
+                    try {
+                        const item = JSON.parse(decodeURIComponent(cb.value));
+                        if (ids.includes(item.unique_id)) cb.checked = true;
+                    } catch(e) {}
+                });
+            };
+            
+            restoreSelection('activeTableBody', activeSelected);
+            restoreSelection('historyTableBody', historySelected);
+            updateSelectionCount();
+
         } catch (e) { console.error("Error fetching records:", e); }
     };
 
@@ -522,10 +553,17 @@ function loadAllRecords(user) {
         updateBorrowedStatus();
     };
 
+    // Initial Load
     fetchRecords();
-    supabase.channel('gp_updates').on('postgres_changes', { event: '*', schema: 'public', table: 'gate_passes' }, () => {
-        fetchRecords(); updateBorrowedStatus(); 
-    }).subscribe();
+
+    // POLLING: Refresh every 5 seconds (Silently)
+    setInterval(() => {
+        // Only fetch if the tab is visible to save resources
+        if (!document.hidden) {
+            fetchRecords();
+            updateBorrowedStatus();
+        }
+    }, 5000);
 }
 
 function renderTable(type) {
@@ -1528,16 +1566,14 @@ if (processImportBtn) {
         r.readAsArrayBuffer(f);
     });
 }
-if(saveBulkBtn) {
-    saveBulkBtn.addEventListener('click', async () => {
-        if(!bulkImportData.length) return;
-        if(!await showConfirm("Import", `Save ${bulkImportData.length} items?`)) return;
-        
-        const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
-        if(error) alert("Error: " + error.message);
-        else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
-    });
-}
+document.getElementById('saveBulkBtn')?.addEventListener('click', async () => {
+    if(!bulkImportData.length) return;
+    if(!await showConfirm("Import", `Save ${bulkImportData.length} items?`)) return;
+    
+    const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
+    if(error) alert("Error: " + error.message);
+    else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
+});
 
 // CRITICAL: Ensure initialization only after DOM is ready
 window.addEventListener('DOMContentLoaded', () => {
