@@ -675,40 +675,66 @@ window.updateDueDate = async (id, newDate) => {
 
 // === SEARCH LISTENER INITIALIZATION ===
 function initSearchListeners() {
-    // 1. Handle Typing in Search Box
-    const searchBox = document.getElementById('tableSearch');
-    if (searchBox) {
-        searchBox.addEventListener('input', (e) => {
+    // 1. Active Log Search (Global Search Bar)
+    const activeSearch = document.getElementById('tableSearch');
+    if (activeSearch) {
+        // Update functionality to ONLY filter Active Data
+        activeSearch.placeholder = "Search Active Records...";
+        
+        // Remove potential duplicate listeners by recreating the element (safest without named functions)
+        const newActiveSearch = activeSearch.cloneNode(true);
+        activeSearch.parentNode.replaceChild(newActiveSearch, activeSearch);
+        
+        newActiveSearch.addEventListener('input', (e) => {
             const term = e.target.value.toLowerCase();
-            
-            // Update Active Log
             paginationState.active.filter = term;
-            paginationState.active.page = 1;
+            paginationState.active.page = 1; 
             renderTable('active');
+        });
 
-            // Update History Log
-            paginationState.history.filter = term;
-            paginationState.history.page = 1;
-            renderTable('history');
+        // 2. Tab Switching Visuals for Active Search
+        const tabEls = document.querySelectorAll('button[data-bs-toggle="pill"], button[data-bs-toggle="tab"]');
+        tabEls.forEach(tabEl => {
+            tabEl.addEventListener('shown.bs.tab', (event) => {
+                const targetId = event.target.getAttribute('data-bs-target');
+                const isHistory = targetId && targetId.includes('history');
+                
+                // Dim/Disable active search when not on active tab to reduce confusion
+                newActiveSearch.disabled = isHistory;
+                newActiveSearch.style.opacity = isHistory ? '0.4' : '1';
+                newActiveSearch.placeholder = isHistory ? "Use History Search below" : "Search Active Records...";
+            });
         });
     }
 
-    // 2. Handle Tab Switching (Sync Search Term)
-    const tabEls = document.querySelectorAll('button[data-bs-toggle="pill"], button[data-bs-toggle="tab"]');
-    tabEls.forEach(tabEl => {
-        tabEl.addEventListener('shown.bs.tab', (event) => {
-            const targetId = event.target.getAttribute('data-bs-target'); // e.g., #activeTab or #historyTab
-            const type = (targetId && targetId.includes('history')) ? 'history' : 'active';
+    // 3. Inject Dedicated History Search Bar
+    const historyTbody = document.getElementById('historyTableBody');
+    if (historyTbody && !document.getElementById('historySearchInput')) {
+        const tableResponsive = historyTbody.closest('.table-responsive');
+        if (tableResponsive) {
+            // Create container
+            const searchContainer = document.createElement('div');
+            searchContainer.className = "d-flex justify-content-end mb-2 align-items-center";
+            searchContainer.innerHTML = `
+                <div class="input-group" style="width: 300px;">
+                    <span class="input-group-text bg-white border-end-0"><i class="fa fa-search text-muted"></i></span>
+                    <input type="text" id="historySearchInput" class="form-control border-start-0" placeholder="Search History Log...">
+                </div>
+            `;
             
-            // Apply current search term to the new tab immediately
-            if(searchBox) {
-                const currentTerm = searchBox.value.toLowerCase();
-                paginationState[type].filter = currentTerm;
-                paginationState[type].page = 1; 
-            }
-            renderTable(type);
-        });
-    });
+            // Insert before the table container
+            tableResponsive.parentNode.insertBefore(searchContainer, tableResponsive);
+
+            // Bind Listener
+            const historySearch = document.getElementById('historySearchInput');
+            historySearch.addEventListener('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                paginationState.history.filter = term;
+                paginationState.history.page = 1;
+                renderTable('history');
+            });
+        }
+    }
 }
 
 document.getElementById('returnBtn')?.addEventListener('click', async () => {
@@ -904,137 +930,6 @@ document.getElementById('btnExportGatePass')?.addEventListener('click', async ()
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) { doc.setPage(i); stampFooter(); }
         doc.save(`GatePass_${borrowerName}_${firstItem.unique_id}.pdf`);
-    });
-});
-
-document.getElementById('btnExportAckReceipt')?.addEventListener('click', async () => {
-    const items = getSelectedItems();
-    if (items.length === 0) return;
-
-    const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
-    if (borrowers.size > 1) return alert("Error: Select items for a single borrower only.");
-
-    const borrowerName = items[0].borrower || "Unknown";
-    if (!await closeExportAndConfirm("Export Receipt", `Generate Acknowledgement Receipt for ${borrowerName}?`)) return;
-
-    const projectName = items[0].project || "N/A";
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'mm', 'a4');
-
-    const addFooter = (docInstance) => {
-        const pageWidth = docInstance.internal.pageSize.width;
-        const pageHeight = docInstance.internal.pageSize.height;
-        const footerY = pageHeight - 20;
-        docInstance.setLineWidth(0.5); docInstance.line(10, footerY - 5, pageWidth - 10, footerY - 5);
-        docInstance.setFontSize(8); docInstance.setFont("helvetica", "normal"); docInstance.setTextColor(0, 0, 0);
-        docInstance.text("3rd Floor STWLPC Building, 335-338 Sen. Gil Puyat Avenue (Buendia)", pageWidth / 2, footerY, { align: "center" });
-        docInstance.text("Barangay 49 Zone 7, Pasay City Philippines 1300", pageWidth / 2, footerY + 4, { align: "center" });
-        docInstance.text("Telephone (632) 833-8284 • Telefax (632) 834-0051", pageWidth / 2, footerY + 8, { align: "center" });
-        docInstance.text("Email Address: ncr5@psa.gov.ph, Website: www.psa.gov.ph", pageWidth / 2, footerY + 12, { align: "center" });
-    };
-
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text("Ref No.: 2026-0002", 15, 15);
-    doc.setFontSize(11); doc.text("REPUBLIC OF THE PHILIPPINES", 105, 15, { align: "center" });
-    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("PHILIPPINE STATISTICS AUTHORITY", 105, 20, { align: "center" });
-    doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.text("Acknowledgment Form", 105, 30, { align: "center" });
-
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    const text1 = "All hired field-based personnel for the specified project listed below acknowledges the receipt of the following: a) tablet, b) accessories compatible case and adapter, and c) powerbank.";
-    const text2 = "All personnel who were given these devices will be held liable for any acts of negligence and malicious intent resulting to the loss or damage of these tablets. Should there be a lost/damaged tablet, the responsible personnel should immediately inform the incident to their immediate supervisor. Upon the evaluation of the Philippine Statistics Authority (PSA) Provincial Statistical Office (PSO) Chief Statistical Specialist (CSS), an anticipated cost required to repair the damage in the tablet must be shouldered by the liable personnel. In the event that the tablet is lost, a salary deduction equivalent to the market value of the comparable device must be charged against the responsible personnel. Due to this, it is crucial to exercise caution and care to the equipment/device entrusted by the PSA to every field-based personnel for the successful and secure operationalization.";
-    const text3 = "Affixing your name and signature in the next page signifies that you hereby acknowledge the receipt of the above-listed devices/items under your name and fully understand the responsibilities attached to these.";
-
-    doc.text(doc.splitTextToSize(text1, 180), 15, 40);
-    const splitText2 = doc.splitTextToSize(text2, 180);
-    doc.text(splitText2, 15, 55);
-    const splitText3 = doc.splitTextToSize(text3, 180);
-    let currentY = 55 + (splitText2.length * 5) + 5;
-    doc.text(splitText3, 15, currentY);
-    currentY += (splitText3.length * 5) + 10;
-
-    doc.setFont("helvetica", "bold"); doc.text(`Project: ${projectName}`, 15, currentY); doc.text("Instructor: ___________________________", 15, currentY + 7);
-    currentY += 15;
-
-    const tableData = items.map((item, index) => {
-        let accessories = "-";
-        const descLower = (item.description || "").toLowerCase();
-        if (descLower.includes('tablet') || descLower.includes('samsung') || descLower.includes('ipad')) accessories = "With Powerbank and/or Accessories";
-        else if (descLower.includes('laptop')) accessories = "With Charger and Bag";
-
-        return [index + 1, "", (item.description && item.description.toLowerCase().includes('samsung')) ? "Samsung" : (item.description || ""), item.serial, item.asset_no || "", accessories, "", ""];
-    });
-
-    doc.autoTable({
-        startY: currentY,
-        head: [["No.", "Name of Hired\nBased Personnel", "Tablet Brand", "Serial Number", "Asset Tag\nNumber", "With Powerbank\nand/or Accessories", "Signature", "Date of\nAcknowledgement"]],
-        body: tableData, theme: 'grid',
-        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.3, halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 8 },
-        styles: { textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.3, fontSize: 8, valign: 'middle' },
-        columnStyles: { 0: { width: 10, halign: 'center' }, 1: { width: 35 }, 2: { width: 20 }, 3: { width: 25 }, 4: { width: 20, halign: 'center' }, 5: { width: 30, fontSize: 7 }, 6: { width: 25 }, 7: { width: 20 } },
-        didDrawPage: function (data) { addFooter(doc); }
-    });
-
-    const totalPages = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i); doc.setFontSize(8); doc.text(`Page ${i} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 4);
-    }
-    doc.save(`AcknowledgementReceipt_${projectName}_${new Date().toISOString().split('T')[0]}.pdf`);
-});
-
-document.getElementById('btnExportTransmittal')?.addEventListener('click', async () => {
-    const items = getSelectedItems();
-    if (items.length === 0) return;
-
-    const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
-    if (borrowers.size > 1) return alert("Error: Select items for a single borrower only.");
-
-    const borrowerName = items[0].borrower || "Unknown";
-    if (!await closeExportAndConfirm("Export Transmittal", `Generate Transmittal Form for ${borrowerName}?`)) return;
-
-    const grouped = items.reduce((acc, item) => {
-        const key = item.destination || 'Unspecified';
-        if (!acc[key]) acc[key] = []; acc[key].push(item); return acc;
-    }, {});
-
-    const { jsPDF } = window.jspdf;
-    Object.keys(grouped).forEach(dest => {
-        const doc = new jsPDF();
-        const batch = grouped[dest];
-        const summary = {};
-        
-        batch.forEach(item => {
-            const d = (item.description || "").toLowerCase();
-            if (d.includes('tablet') || d.includes('samsung')) { summary["Samsung Tablet"] = (summary["Samsung Tablet"] || 0) + 1; summary["Adapter"] = (summary["Adapter"] || 0) + 1; summary["Type C Cable"] = (summary["Type C Cable"] || 0) + 1; summary["Box"] = (summary["Box"] || 0) + 1; item._acc = "With type c cable, box and adapter"; }
-            else if (d.includes('laptop')) { summary["Laptop"] = (summary["Laptop"] || 0) + 1; summary["Charger"] = (summary["Charger"] || 0) + 1; summary["Bag"] = (summary["Bag"] || 0) + 1; item._acc = "With charger and bag"; }
-            else { summary[item.description || "Equipment"] = (summary[item.description] || 0) + 1; item._acc = "-"; }
-        });
-
-        doc.setFontSize(10); doc.setTextColor(0,0,0); doc.text("Republic of the Philippines", 105, 15, {align:'center'});
-        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.text("PHILIPPINE STATISTICS AUTHORITY", 105, 20, {align:'center'});
-        doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("2024 POPCEN-CBMS", 105, 25, {align:'center'}); doc.text(dest.toUpperCase(), 105, 30, {align:'center'});
-        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text("TRANSMITTAL / RECEIPT FORM", 105, 40, {align:'center'});
-        doc.setFontSize(9); doc.setFont("helvetica", "italic"); doc.text("(Accomplish in duplicate copies)", 105, 45, {align:'center'});
-
-        const summaryData = Object.entries(summary).map(([k, v]) => [k, v]);
-        doc.autoTable({ startY: 55, head: [['ITEMS', 'QTY']], body: summaryData, theme: 'grid', styles: { fontSize: 9, textColor: [0,0,0], lineColor: [0,0,0], lineWidth: 0.4 }, headStyles: { fillColor: [220, 220, 220], textColor: [0,0,0], fontStyle: 'bold', halign: 'center', lineColor: [0,0,0], lineWidth: 0.4 }, columnStyles: { 0: { halign: 'left' }, 1: { width: 30, halign: 'center' } } });
-
-        const tableBody = batch.map((item, i) => [i + 1, `${item.description}\n\n${item.serial}`, item.asset_no || '', '1', item._acc]);
-        doc.autoTable({ startY: doc.lastAutoTable.finalY + 10, head: [['No.', 'SERIAL No. / ITEM NAME', 'ASSET TAG No.', 'UNIT', 'ACCESSORIES']], body: tableBody, theme: 'grid', headStyles: { fillColor: [255, 255, 255], textColor: [0,0,0], lineColor: [0,0,0], lineWidth: 0.4, halign: 'center', valign: 'middle', fontStyle: 'bold' }, styles: { textColor: [0,0,0], lineColor: [0,0,0], lineWidth: 0.4, valign: 'middle', cellPadding: 3 }, columnStyles: { 0: { halign: 'center', width: 10 }, 1: { width: 80 }, 2: { halign: 'center' }, 3: { halign: 'center', width: 15 }, 4: { width: 50 } } });
-
-        let finalY = doc.lastAutoTable.finalY + 20;
-        if (finalY + 50 > doc.internal.pageSize.height - 20) { doc.addPage(); finalY = 40; }
-
-        const drawSigBlock = (x, label) => {
-            let currentBlockY = finalY; doc.text(label + ":", x, currentBlockY); currentBlockY += 15;
-            doc.setLineWidth(0.5); doc.setDrawColor(0,0,0); doc.line(x, currentBlockY, x + 80, currentBlockY);
-            doc.setFontSize(8); doc.text("SIGNATURE OVER PRINTED NAME", x + 40, currentBlockY + 5, {align:'center'}); currentBlockY += 15;
-            doc.line(x, currentBlockY, x + 80, currentBlockY); doc.text("POSITION / DESIGNATION", x + 40, currentBlockY + 5, {align:'center'}); currentBlockY += 15;
-            doc.line(x, currentBlockY, x + 80, currentBlockY); doc.text("DATE SIGNED", x + 40, currentBlockY + 5, {align:'center'}); doc.setFontSize(10);
-        };
-        drawSigBlock(15, "Transmitted by"); drawSigBlock(115, "Received by");
-
-        const totalPages = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= totalPages; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(0, 0, 0); doc.text(`Page ${i} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10); }
-        doc.save(`Transmittal_${dest}_${new Date().toISOString().split('T')[0]}.pdf`);
     });
 });
 
