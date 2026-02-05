@@ -22,6 +22,8 @@ let paginationState = {
     history: { page: 1, limit: 10, filter: '' }
 };
 
+console.log("App.js loaded. Initializing...");
+
 // ==========================================
 // UTILS
 // ==========================================
@@ -33,45 +35,38 @@ function showConfirm(title, message) {
         const titleEl = document.getElementById('confirmTitle');
         const textEl = document.getElementById('confirmText');
         const yesBtn = document.getElementById('confirmBtnYes');
-        const cancelBtn = modalEl.querySelector('.btn-secondary'); // Get cancel button
+        const cancelBtn = modalEl.querySelector('.btn-secondary'); 
         
         titleEl.innerText = title;
         textEl.innerText = message;
         
-        // Create modal instance
         const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
         modal.show();
 
-        // Handle Confirm
         const handleConfirm = () => {
             modal.hide();
             cleanup();
             resolve(true);
         };
 
-        // Handle Cancel
         const handleCancel = () => {
-            modal.hide(); // Bootstrap handles removal, but good to be explicit if needed
+            modal.hide();
             cleanup();
             resolve(false);
         };
 
-        // Cleanup listeners to avoid duplicates if modal is reused (though we create new instance here)
         const cleanup = () => {
             yesBtn.onclick = null;
-            cancelBtn.onclick = null; // Clear cancel listener too
+            if(cancelBtn) cancelBtn.onclick = null;
             modalEl.removeEventListener('hidden.bs.modal', handleCancelModalEvent);
         };
 
-        // Event listener for when modal is hidden via other means (keyboard, backdrop if enabled)
         const handleCancelModalEvent = () => {
             resolve(false);
         };
 
         yesBtn.onclick = handleConfirm;
-        cancelBtn.onclick = handleCancel; // Attach to Cancel button
-        
-        // Safety net: if they click X or escape (if allowed)
+        if(cancelBtn) cancelBtn.onclick = handleCancel;
         modalEl.addEventListener('hidden.bs.modal', handleCancelModalEvent, { once: true });
     });
 }
@@ -148,15 +143,15 @@ async function handleLogin(e) {
                 .eq('email', email)
                 .single();
             
-            if (userError || !userData) throw new Error("Account not found in office records. Please Sign Up first.");
-            if (userData.approved !== true) throw new Error("Access Denied: Pending Admin/Guard approval.");
+            if (userError || !userData) throw new Error("Account not found. Please Sign Up.");
+            if (userData.approved !== true) throw new Error("Access Denied: Pending Admin approval.");
         }
 
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         
         if (error) {
             if (error.message.includes("Email not confirmed")) {
-                throw new Error("System Config Error: Please ask Admin to disable 'Confirm Email' in Supabase.");
+                throw new Error("System Config Error: Ask Admin to disable 'Confirm Email'.");
             }
             throw error;
         }
@@ -202,7 +197,7 @@ async function handleSignup(e) {
 
     if (!firstName || !lastName || !email) return alert("Please fill all details.");
     if (pass.length < 6) return alert("Password must be at least 6 characters.");
-    if (pass !== passConfirm) return alert("Passwords do not match! Please check and try again.");
+    if (pass !== passConfirm) return alert("Passwords do not match!");
     
     const name = `${firstName} ${lastName}`;
     const btn = document.getElementById('requestBtn');
@@ -223,13 +218,13 @@ async function handleSignup(e) {
 
         if (userError) console.error("Profile warning:", userError);
 
-        alert("Account created successfully! Please wait for the Admin/Guard to confirm your access.");
+        alert("Request submitted! Wait for Admin approval.");
         await supabase.auth.signOut(); 
         window.location.href = 'index.html';
 
     } catch (error) {
         if (error.message.includes("rate limit") || error.status === 429) {
-            alert("Signup Limit: Please wait or ask Admin to disable 'Confirm Email'.");
+            alert("Signup Limit: Please wait or ask Admin.");
         } else {
             alert("Error: " + error.message);
         }
@@ -245,21 +240,20 @@ async function loadRegistrationRequests() {
     const section = document.getElementById('adminRequestSection');
     
     if (!tbody) {
-        console.warn("loadRegistrationRequests called, but requestTableBody not found. (Not on admin.html?)");
+        console.warn("requestTableBody not found. Not on admin page?");
         return;
     }
 
     if(section) section.style.display = 'block';
 
     const fetchRequests = async () => {
-        console.log("Fetching registration requests...");
         try {
             const { data, error } = await supabase.from('registration_requests').select('*');
             if (error) throw error;
             
             tbody.innerHTML = "";
             if (!data || data.length === 0) {
-                tbody.innerHTML = "<tr><td colspan='4' class='text-center text-muted py-3'>No pending requests found.</td></tr>";
+                tbody.innerHTML = "<tr><td colspan='4' class='text-center text-muted py-3'>No pending requests.</td></tr>";
                 return;
             }
             data.forEach(d => {
@@ -276,7 +270,7 @@ async function loadRegistrationRequests() {
             });
         } catch (err) {
             console.error("Error loading requests:", err);
-            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger py-3'>Error loading requests. Check console.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger'>Error loading data.</td></tr>`;
         }
     };
 
@@ -285,7 +279,7 @@ async function loadRegistrationRequests() {
 }
 
 window.approveUser = async (reqId, email, name, password) => {
-    if (!await showConfirm("Approve", `Approve access for ${email}?`)) return;
+    if (!await showConfirm("Approve", `Approve ${email}?`)) return;
     try {
         const { error: upsertError } = await supabase.from('users').upsert({
             email: email, name: name, password: password, approved: true, role: 'user'
@@ -294,7 +288,7 @@ window.approveUser = async (reqId, email, name, password) => {
         if (upsertError) throw upsertError;
 
         await supabase.from('registration_requests').delete().eq('id', reqId);
-        alert("User Approved! Refreshing...");
+        alert("User Approved!");
         window.location.reload(); 
     } catch (e) { alert(e.message); }
 };
@@ -313,9 +307,7 @@ window.cancelRequest = async (id) => {
 // C. DASHBOARD INITIALIZATION
 // ==========================================
 async function initDashboard(user) {
-    console.log("Initializing Dashboard for:", user.email);
     const borrowerInput = document.getElementById('borrower');
-    
     if (!user || !user.email) return;
 
     try {
@@ -347,7 +339,6 @@ async function initDashboard(user) {
             window.location.href = 'dashboard.html';
             return;
         }
-
         if (borrowerInput) {
             borrowerInput.value = currentUserName;
             borrowerInput.readOnly = true;
@@ -363,9 +354,6 @@ async function initDashboard(user) {
     }
 }
 
-// ==========================================
-// D. ISSUANCE & CART
-// ==========================================
 function updateClock() {
     const timeEl = document.getElementById('clockTime');
     const dateEl = document.getElementById('clockDate');
@@ -454,7 +442,6 @@ document.getElementById('issueBtn')?.addEventListener('click', async () => {
     } catch(e) { alert(e.message); }
 });
 
-// --- INVENTORY AUTOCOMPLETE ---
 async function loadInventory() {
     let list = document.getElementById('inventoryList');
     if (!list) {
@@ -507,17 +494,10 @@ document.getElementById('serial')?.addEventListener('change', (e) => {
     }
 });
 
-// ==========================================
-// E. RECORDS & TABLES & PAGINATION
-// ==========================================
 function loadAllRecords(user) {
-    const activeTbody = document.getElementById('activeTableBody');
-    const historyTbody = document.getElementById('historyTableBody');
     const isAdmin = user.email === ADMIN_EMAIL;
     
     const fetchRecords = async () => {
-        console.log("Fetching records...");
-        
         try {
             let query = supabase.from('gate_passes').select('*').eq('status', 'OUT').order('time_out', { ascending: false }).limit(1000);
             if (!isAdmin) query = query.eq('issuer_email', user.email);
@@ -531,12 +511,10 @@ function loadAllRecords(user) {
             if (hError) throw hError;
             if(hData) historyData = hData;
 
-            // Initially render both
+            // Initially render both with empty search
             renderTable('active');
             renderTable('history');
-        } catch (e) {
-            console.error("Error fetching records:", e);
-        }
+        } catch (e) { console.error("Error fetching records:", e); }
     };
 
     window.refreshTableData = () => {
@@ -558,21 +536,22 @@ function renderTable(type) {
     if (!tbody) return;
     
     let filtered = rawData;
+    
+    // === REVISED SEARCH LOGIC ===
     if (state.filter) {
-        const term = state.filter;
+        const term = state.filter.toLowerCase();
         filtered = rawData.filter(item => {
-            // Search specific visible fields only to avoid matching hidden metadata like emails/status
+            // Prepare formatted dates for search visibility
+            const formattedTimeOut = item.time_out ? new Date(item.time_out).toLocaleString() : '';
+            const formattedTimeReturn = item.time_return ? new Date(item.time_return).toLocaleString() : '';
+            const formattedDueDate = item.due_date ? item.due_date : ''; // usually already string YYYY-MM-DD
+
+            // Search visible fields only
             const fields = [
-                item.unique_id, 
-                item.borrower, 
-                item.description, 
-                item.serial, 
-                item.property_no, 
-                item.asset_no, 
-                item.destination, 
-                item.project, 
-                item.guard_out, 
-                item.guard_in
+                item.unique_id, item.borrower, item.description, 
+                item.serial, item.property_no, item.asset_no, 
+                item.destination, item.project, item.guard_out, item.guard_in,
+                formattedTimeOut, formattedTimeReturn, formattedDueDate, item.status
             ];
             return fields.some(val => val && String(val).toLowerCase().includes(term));
         });
@@ -587,7 +566,7 @@ function renderTable(type) {
     
     tbody.innerHTML = "";
     if (paginatedItems.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3">No records found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3">No records found matching "${state.filter}".</td></tr>`;
     } else {
         const today = new Date().toISOString().split('T')[0];
         const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
@@ -602,7 +581,6 @@ function renderTable(type) {
                     else if (data.due_date === today) { badge = '<span class="badge bg-warning text-dark">DUE TODAY</span>'; }
                 }
                 
-                // Allow Admin to Edit Due Date Inline
                 let dueDateCell = data.due_date || '-';
                 if (isAdmin) {
                     dueDateCell = `<input type="date" class="form-control form-control-sm border-warning" 
@@ -681,22 +659,18 @@ function renderPaginationControls(type, totalItems, totalPages) {
 window.changeLimit = (type, limit) => { paginationState[type].limit = parseInt(limit); paginationState[type].page = 1; renderTable(type); };
 window.changePage = (type, dir) => { paginationState[type].page += dir; renderTable(type); };
 
-// ADMIN FUNCTION: Update Due Date
 window.updateDueDate = async (id, newDate) => {
     if (!id || !newDate) return;
     if (!await showConfirm("Update", `Change due date to ${newDate}?`)) {
-        window.refreshTableData(); // Revert UI
+        window.refreshTableData();
         return;
     }
-
     try {
         const { error } = await supabase.from('gate_passes').update({ due_date: newDate }).eq('id', id);
         if (error) throw error;
         alert("Due date updated.");
         window.refreshTableData();
-    } catch (e) {
-        alert("Update failed: " + e.message);
-    }
+    } catch (e) { alert("Update failed: " + e.message); }
 };
 
 // === SEARCH LISTENER INITIALIZATION ===
@@ -1190,7 +1164,16 @@ document.getElementById('btnExportAckReceipt')?.addEventListener('click', async 
     // --- Header ---
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("Ref No.: 2026-0002", 15, 15); // Example Ref or could be auto-generated
+    
+    // Auto-generate Unique Reference Number: YYYY-MMDD-HHMM-RAND
+    const now = new Date();
+    const refYear = now.getFullYear();
+    const refDate = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
+    const refTime = String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+    const refRand = Math.floor(1000 + Math.random() * 9000);
+    const refNo = `${refYear}-${refDate}-${refTime}-${refRand}`;
+    
+    doc.text(`Ref No.: ${refNo}`, 15, 15);
 
     doc.setFontSize(11);
     doc.text("REPUBLIC OF THE PHILIPPINES", 105, 15, { align: "center" });
@@ -1545,14 +1528,16 @@ if (processImportBtn) {
         r.readAsArrayBuffer(f);
     });
 }
-document.getElementById('saveBulkBtn')?.addEventListener('click', async () => {
-    if(!bulkImportData.length) return;
-    if(!await showConfirm("Import", `Save ${bulkImportData.length} items?`)) return;
-    
-    const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
-    if(error) alert("Error: " + error.message);
-    else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
-});
+if(saveBulkBtn) {
+    saveBulkBtn.addEventListener('click', async () => {
+        if(!bulkImportData.length) return;
+        if(!await showConfirm("Import", `Save ${bulkImportData.length} items?`)) return;
+        
+        const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
+        if(error) alert("Error: " + error.message);
+        else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
+    });
+}
 
 // CRITICAL: Ensure initialization only after DOM is ready
 window.addEventListener('DOMContentLoaded', () => {
