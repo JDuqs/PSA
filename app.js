@@ -728,9 +728,19 @@ document.getElementById('openExportModalBtn')?.addEventListener('click', () => o
 document.getElementById('openExportHistoryModalBtn')?.addEventListener('click', () => openExportModal('history'));
 
 // UPDATED: EXCEL EXPORT (Clean Format based on Table Columns)
-document.getElementById('btnExportExcel')?.addEventListener('click', () => {
+document.getElementById('btnExportExcel')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (!items.length) return;
+
+    // Check for different borrowers
+    const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
+    if (borrowers.size > 1) {
+        return alert("Error: You cannot export multiple borrowers to the same file. Please select items for a single borrower only.");
+    }
+
+    const borrowerName = items[0].borrower || "Unknown";
+    
+    if (!await showConfirm("Export Excel", `Generate Excel file for ${borrowerName}?`)) return;
 
     // Map to nice columns based on which table we are viewing
     const exportData = items.map(item => {
@@ -771,9 +781,18 @@ document.getElementById('btnExportExcel')?.addEventListener('click', () => {
     XLSX.writeFile(wb, `PSA_Logs_${currentExportContext}_${new Date().toISOString().split('T')[0]}.xlsx`);
 });
 
-document.getElementById('btnExportGatePass')?.addEventListener('click', () => {
+document.getElementById('btnExportGatePass')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (items.length === 0) return;
+
+    // Check for different borrowers
+    const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
+    if (borrowers.size > 1) {
+        return alert("Error: You cannot export multiple borrowers to the same Gate Pass. Please select items for a single borrower only.");
+    }
+
+    const borrowerName = items[0].borrower || "Unknown";
+    if (!await showConfirm("Export Gate Pass", `Generate Gate Pass PDF for ${borrowerName}?`)) return;
 
     const groupByBorrower = (arr) => {
         return arr.reduce((acc, obj) => {
@@ -1007,9 +1026,18 @@ document.getElementById('btnExportGatePass')?.addEventListener('click', () => {
 // ==========================================
 // NEW: ACKNOWLEDGEMENT EXPORT
 // ==========================================
-document.getElementById('btnExportAckReceipt')?.addEventListener('click', () => {
+document.getElementById('btnExportAckReceipt')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (items.length === 0) return;
+
+    // Check for different borrowers
+    const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
+    if (borrowers.size > 1) {
+        return alert("Error: You cannot export multiple borrowers to the same Receipt. Please select items for a single borrower only.");
+    }
+
+    const borrowerName = items[0].borrower || "Unknown";
+    if (!await showConfirm("Export Receipt", `Generate Acknowledgement Receipt for ${borrowerName}?`)) return;
 
     // Auto-detect Project Name from the first selected item
     // The user requested this be based on the logs/data
@@ -1171,9 +1199,18 @@ document.getElementById('btnExportAckReceipt')?.addEventListener('click', () => 
 });
 
 // NEW: TRANSMITTAL EXPORT FUNCTIONALITY
-document.getElementById('btnExportTransmittal')?.addEventListener('click', () => {
+document.getElementById('btnExportTransmittal')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (items.length === 0) return;
+
+    // Check for different borrowers
+    const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
+    if (borrowers.size > 1) {
+        return alert("Error: You cannot export multiple borrowers to the same Transmittal. Please select items for a single borrower only.");
+    }
+
+    const borrowerName = items[0].borrower || "Unknown";
+    if (!await showConfirm("Export Transmittal", `Generate Transmittal Form for ${borrowerName}?`)) return;
 
     // Group items by Destination
     const grouped = items.reduce((acc, item) => {
