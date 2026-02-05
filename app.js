@@ -136,7 +136,7 @@ async function handleLogin(e) {
     if(btn) { btn.disabled = true; btn.innerText = "Verifying..."; }
 
     try {
-        // 1. AUTHENTICATE FIRST (Changed Order)
+        // 1. AUTHENTICATE FIRST (Changed Order for RLS)
         // We must log in first so Supabase knows who we are before checking the 'users' table
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         
@@ -149,10 +149,12 @@ async function handleLogin(e) {
 
         // 2. CHECK APPROVAL STATUS (Now that we are logged in)
         if (email !== ADMIN_EMAIL) {
+            // UPDATED: Use UID for lookup instead of email. 
+            // RLS policies usually enforce "auth.uid() = uid", so fetching by UID is safer.
             const { data: userData, error: userError } = await supabase
                 .from('users')
                 .select('*') 
-                .eq('email', email)
+                .eq('uid', data.user.id) // <--- Changed from email to uid
                 .single();
             
             // If the user is not in our custom 'users' table or not approved
@@ -170,15 +172,15 @@ async function handleLogin(e) {
         const sessionToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
         
         // 2. Update 'users' table with this token
-        // Use UID first for reliability, fallback to Email if UID mapping is missing
+        // Use UID for reliability (RLS Compatible)
         const { error: updateError } = await supabase
             .from('users')
             .update({ session_token: sessionToken })
             .eq('uid', data.user.id); 
 
         if (updateError) {
-            console.warn("Session Update via UID failed. Trying Email fallback...", updateError);
-            await supabase.from('users').update({ session_token: sessionToken }).eq('email', email);
+            // Fallback only if absolutely necessary, but UID should work
+            console.warn("Session Update error:", updateError);
         }
         
         // 3. Store locally to identify this device
@@ -191,7 +193,9 @@ async function handleLogin(e) {
         const msgEl = document.getElementById('errorMsg');
         let displayMsg = "Login Failed: " + error.message;
         if (error.message.includes("Invalid login credentials")) displayMsg = "Incorrect email or password.";
-        
+        // Catch RLS Errors specifically
+        if (error.code === 'PGRST301' || error.message.includes('policy')) displayMsg = "Database Security Error: Permission denied.";
+
         if (msgEl) msgEl.innerText = displayMsg;
         else alert(displayMsg);
         
@@ -242,14 +246,18 @@ async function handleSignup(e) {
         });
         if (authError) throw authError;
 
+        // Note: With RLS, 'anon' (unauthenticated) role must have INSERT permission on 'registration_requests'
         await supabase.from('registration_requests').insert([{ name, email, pass, status: 'PENDING' }]);
         
         const uid = authData.user ? authData.user.uid : null;
+        
+        // Note: With RLS, users can usually only insert their OWN rows. 
+        // We include UID here to ensure it matches the authenticated user.
         const { error: userError } = await supabase.from('users').insert([{ 
             email, name, password: pass, approved: false, role: 'user', uid: uid
         }]);
 
-        if (userError) console.error("Profile warning:", userError);
+        if (userError) console.error("Profile creation warning:", userError);
 
         alert("Request submitted! Wait for Admin approval.");
         await supabase.auth.signOut(); 
@@ -344,7 +352,15 @@ async function initDashboard(user) {
     if (!user || !user.email) return;
 
     try {
-        const { data: userProfile } = await supabase.from('users').select('name').eq('email', user.email).single();
+        // Updated to search by UID if possible for better RLS compatibility
+        let query = supabase.from('users').select('name');
+        if (user.id) {
+            query = query.eq('uid', user.id);
+        } else {
+            query = query.eq('email', user.email);
+        }
+
+        const { data: userProfile } = await query.single();
         if (userProfile) currentUserName = userProfile.name;
         else currentUserName = user.email.split('@')[0];
     } catch (e) {
