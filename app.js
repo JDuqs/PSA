@@ -136,6 +136,7 @@ async function handleLogin(e) {
     if(btn) { btn.disabled = true; btn.innerText = "Verifying..."; }
 
     try {
+        // Check local users table for approval
         if (email !== ADMIN_EMAIL) {
             const { data: userData, error: userError } = await supabase
                 .from('users')
@@ -147,6 +148,7 @@ async function handleLogin(e) {
             if (userData.approved !== true) throw new Error("Access Denied: Pending Admin approval.");
         }
 
+        // Authenticate with Supabase Auth
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         
         if (error) {
@@ -161,8 +163,16 @@ async function handleLogin(e) {
         const sessionToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
         
         // 2. Update 'users' table with this token
-        // IMPORTANT: You must have a 'session_token' column in your 'users' table
-        await supabase.from('users').update({ session_token: sessionToken }).eq('email', email);
+        // Use UID first for reliability, fallback to Email if UID mapping is missing
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ session_token: sessionToken })
+            .eq('uid', data.user.id); 
+
+        if (updateError) {
+            console.warn("Session Update via UID failed. Trying Email fallback...", updateError);
+            await supabase.from('users').update({ session_token: sessionToken }).eq('email', email);
+        }
         
         // 3. Store locally to identify this device
         localStorage.setItem('session_token', sessionToken);
@@ -188,7 +198,7 @@ if (loginForm) loginForm.addEventListener('submit', handleLogin);
 if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
         await supabase.auth.signOut();
-        localStorage.removeItem('session_token'); // Clear token
+        localStorage.removeItem('session_token');
         window.location.href = 'index.html';
     });
 }
@@ -365,28 +375,43 @@ async function initDashboard(user) {
         updateClock();
         initSearchListeners(); 
 
-        // --- SINGLE SESSION POLLING ---
-        // Checks every 5 seconds if the session token in DB matches this device
-        setInterval(async () => {
-            if (document.hidden) return; 
-
+        // --- SINGLE SESSION POLLING LOGIC ---
+        const checkSession = async () => {
             const localToken = localStorage.getItem('session_token');
             if (!localToken) return; 
 
-            const { data: userSession } = await supabase
-                .from('users')
-                .select('session_token')
-                .eq('email', user.email)
-                .single();
+            // Check against DB using UID if available, else email
+            let query = supabase.from('users').select('session_token');
+            if (user.id) {
+                query = query.eq('uid', user.id);
+            } else {
+                query = query.eq('email', user.email);
+            }
+            
+            const { data: userSession, error } = await query.single();
+
+            if (error) {
+                console.warn("Session check error (safe to ignore if logged out):", error.message);
+                return;
+            }
 
             // If DB token exists and is DIFFERENT from local, it means another login happened
             if (userSession && userSession.session_token && userSession.session_token !== localToken) {
+                console.log("Force Logout: Session mismatch", { local: localToken, db: userSession.session_token });
                 alert("Session Expired: You have been logged in on another device.");
                 await supabase.auth.signOut();
                 localStorage.removeItem('session_token');
                 window.location.href = 'index.html';
             }
+        };
+
+        // Check every 5 seconds
+        setInterval(async () => {
+            if (!document.hidden) await checkSession();
         }, 5000);
+
+        // Check immediately when user focuses tab
+        window.addEventListener('focus', checkSession);
     }
 }
 
@@ -535,7 +560,7 @@ function loadAllRecords(user) {
     
     const fetchRecords = async () => {
         try {
-            // 1. Capture current selections
+            // 1. Capture current selections before fetching/rendering
             const getSelectedIds = (tbodyId) => {
                 const checked = document.querySelectorAll(`#${tbodyId} .export-check:checked`);
                 return Array.from(checked).map(cb => {
@@ -602,7 +627,7 @@ function loadAllRecords(user) {
     // Initial Load
     fetchRecords();
 
-    // POLLING: Refresh records every 5 seconds (Silently)
+    // POLLING: Refresh every 5 seconds (Silently)
     setInterval(() => {
         // Only fetch if the tab is visible to save resources
         if (!document.hidden) {
