@@ -136,19 +136,8 @@ async function handleLogin(e) {
     if(btn) { btn.disabled = true; btn.innerText = "Verifying..."; }
 
     try {
-        // Check local users table for approval
-        if (email !== ADMIN_EMAIL) {
-            const { data: userData, error: userError } = await supabase
-                .from('users')
-                .select('*') 
-                .eq('email', email)
-                .single();
-            
-            if (userError || !userData) throw new Error("Account not found. Please Sign Up.");
-            if (userData.approved !== true) throw new Error("Access Denied: Pending Admin approval.");
-        }
-
-        // Authenticate with Supabase Auth
+        // 1. AUTHENTICATE FIRST (Changed Order)
+        // We must log in first so Supabase knows who we are before checking the 'users' table
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         
         if (error) {
@@ -156,6 +145,24 @@ async function handleLogin(e) {
                 throw new Error("System Config Error: Ask Admin to disable 'Confirm Email'.");
             }
             throw error;
+        }
+
+        // 2. CHECK APPROVAL STATUS (Now that we are logged in)
+        if (email !== ADMIN_EMAIL) {
+            const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('*') 
+                .eq('email', email)
+                .single();
+            
+            // If the user is not in our custom 'users' table or not approved
+            if (userError || !userData || userData.approved !== true) {
+                // Force logout immediately
+                await supabase.auth.signOut();
+                
+                if (userError || !userData) throw new Error("Account setup incomplete. Please contact Admin.");
+                if (userData.approved !== true) throw new Error("Access Denied: Pending Admin approval.");
+            }
         }
 
         // --- SINGLE SESSION ENFORCEMENT START ---
@@ -188,6 +195,9 @@ async function handleLogin(e) {
         if (msgEl) msgEl.innerText = displayMsg;
         else alert(displayMsg);
         
+        // Ensure we are signed out if we hit an error during the process
+        await supabase.auth.signOut();
+
         if(btn) { btn.disabled = false; btn.innerText = "LOGIN TO SYSTEM"; }
     }
 }
