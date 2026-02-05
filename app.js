@@ -513,14 +513,24 @@ function loadAllRecords(user) {
 
             // 2. Fetch Active Data
             let query = supabase.from('gate_passes').select('*').eq('status', 'OUT').order('time_out', { ascending: false }).limit(1000);
-            if (!isAdmin) query = query.eq('issuer_email', user.email);
+            
+            if (!isAdmin) {
+                // Show records issued BY the user OR records issued TO the user (matching name)
+                query = query.or(`issuer_email.eq.${user.email},borrower.eq.${currentUserName}`);
+            }
+            
             const { data: aData, error: aError } = await query;
             if (aError) throw aError;
             if(aData) activeData = aData;
 
             // 3. Fetch History Data
             let hQuery = supabase.from('gate_passes').select('*').eq('status', 'RETURNED').order('time_return', { ascending: false }).limit(1000);
-            if (!isAdmin) hQuery = hQuery.eq('issuer_email', user.email);
+            
+            if (!isAdmin) {
+                // Show records issued BY the user OR records issued TO the user (matching name)
+                hQuery = hQuery.or(`issuer_email.eq.${user.email},borrower.eq.${currentUserName}`);
+            }
+
             const { data: hData, error: hError } = await hQuery;
             if (hError) throw hError;
             if(hData) historyData = hData;
@@ -529,7 +539,7 @@ function loadAllRecords(user) {
             renderTable('active');
             renderTable('history');
 
-            // 5. Restore Selections (Check the boxes that were checked before refresh)
+            // 5. Restore Selections
             const restoreSelection = (tbodyId, ids) => {
                 if(!ids || !ids.length) return;
                 const checkboxes = document.querySelectorAll(`#${tbodyId} .export-check`);
