@@ -22,6 +22,8 @@ let paginationState = {
     history: { page: 1, limit: 10, filter: '' }
 };
 
+console.log("App.js loaded. Initializing...");
+
 // ==========================================
 // UTILS
 // ==========================================
@@ -33,45 +35,38 @@ function showConfirm(title, message) {
         const titleEl = document.getElementById('confirmTitle');
         const textEl = document.getElementById('confirmText');
         const yesBtn = document.getElementById('confirmBtnYes');
-        const cancelBtn = modalEl.querySelector('.btn-secondary'); // Get cancel button
+        const cancelBtn = modalEl.querySelector('.btn-secondary'); 
         
         titleEl.innerText = title;
         textEl.innerText = message;
         
-        // Create modal instance
         const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
         modal.show();
 
-        // Handle Confirm
         const handleConfirm = () => {
             modal.hide();
             cleanup();
             resolve(true);
         };
 
-        // Handle Cancel
         const handleCancel = () => {
-            modal.hide(); // Bootstrap handles removal, but good to be explicit if needed
+            modal.hide();
             cleanup();
             resolve(false);
         };
 
-        // Cleanup listeners to avoid duplicates if modal is reused (though we create new instance here)
         const cleanup = () => {
             yesBtn.onclick = null;
-            cancelBtn.onclick = null; // Clear cancel listener too
+            if(cancelBtn) cancelBtn.onclick = null;
             modalEl.removeEventListener('hidden.bs.modal', handleCancelModalEvent);
         };
 
-        // Event listener for when modal is hidden via other means (keyboard, backdrop if enabled)
         const handleCancelModalEvent = () => {
             resolve(false);
         };
 
         yesBtn.onclick = handleConfirm;
-        cancelBtn.onclick = handleCancel; // Attach to Cancel button
-        
-        // Safety net: if they click X or escape (if allowed)
+        if(cancelBtn) cancelBtn.onclick = handleCancel;
         modalEl.addEventListener('hidden.bs.modal', handleCancelModalEvent, { once: true });
     });
 }
@@ -148,15 +143,15 @@ async function handleLogin(e) {
                 .eq('email', email)
                 .single();
             
-            if (userError || !userData) throw new Error("Account not found in office records. Please Sign Up first.");
-            if (userData.approved !== true) throw new Error("Access Denied: Pending Admin/Guard approval.");
+            if (userError || !userData) throw new Error("Account not found. Please Sign Up.");
+            if (userData.approved !== true) throw new Error("Access Denied: Pending Admin approval.");
         }
 
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         
         if (error) {
             if (error.message.includes("Email not confirmed")) {
-                throw new Error("System Config Error: Please ask Admin to disable 'Confirm Email' in Supabase.");
+                throw new Error("System Config Error: Ask Admin to disable 'Confirm Email'.");
             }
             throw error;
         }
@@ -202,7 +197,7 @@ async function handleSignup(e) {
 
     if (!firstName || !lastName || !email) return alert("Please fill all details.");
     if (pass.length < 6) return alert("Password must be at least 6 characters.");
-    if (pass !== passConfirm) return alert("Passwords do not match! Please check and try again.");
+    if (pass !== passConfirm) return alert("Passwords do not match!");
     
     const name = `${firstName} ${lastName}`;
     const btn = document.getElementById('requestBtn');
@@ -223,13 +218,13 @@ async function handleSignup(e) {
 
         if (userError) console.error("Profile warning:", userError);
 
-        alert("Account created successfully! Please wait for the Admin/Guard to confirm your access.");
+        alert("Request submitted! Wait for Admin approval.");
         await supabase.auth.signOut(); 
         window.location.href = 'index.html';
 
     } catch (error) {
         if (error.message.includes("rate limit") || error.status === 429) {
-            alert("Signup Limit: Please wait or ask Admin to disable 'Confirm Email'.");
+            alert("Signup Limit: Please wait or ask Admin.");
         } else {
             alert("Error: " + error.message);
         }
@@ -245,21 +240,20 @@ async function loadRegistrationRequests() {
     const section = document.getElementById('adminRequestSection');
     
     if (!tbody) {
-        console.warn("loadRegistrationRequests called, but requestTableBody not found. (Not on admin.html?)");
+        console.warn("requestTableBody not found. Not on admin page?");
         return;
     }
 
     if(section) section.style.display = 'block';
 
     const fetchRequests = async () => {
-        console.log("Fetching registration requests...");
         try {
             const { data, error } = await supabase.from('registration_requests').select('*');
             if (error) throw error;
             
             tbody.innerHTML = "";
             if (!data || data.length === 0) {
-                tbody.innerHTML = "<tr><td colspan='4' class='text-center text-muted py-3'>No pending requests found.</td></tr>";
+                tbody.innerHTML = "<tr><td colspan='4' class='text-center text-muted py-3'>No pending requests.</td></tr>";
                 return;
             }
             data.forEach(d => {
@@ -276,7 +270,7 @@ async function loadRegistrationRequests() {
             });
         } catch (err) {
             console.error("Error loading requests:", err);
-            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger py-3'>Error loading requests. Check console.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger'>Error loading data.</td></tr>`;
         }
     };
 
@@ -285,7 +279,7 @@ async function loadRegistrationRequests() {
 }
 
 window.approveUser = async (reqId, email, name, password) => {
-    if (!await showConfirm("Approve", `Approve access for ${email}?`)) return;
+    if (!await showConfirm("Approve", `Approve ${email}?`)) return;
     try {
         const { error: upsertError } = await supabase.from('users').upsert({
             email: email, name: name, password: password, approved: true, role: 'user'
@@ -294,7 +288,7 @@ window.approveUser = async (reqId, email, name, password) => {
         if (upsertError) throw upsertError;
 
         await supabase.from('registration_requests').delete().eq('id', reqId);
-        alert("User Approved! Refreshing...");
+        alert("User Approved!");
         window.location.reload(); 
     } catch (e) { alert(e.message); }
 };
@@ -313,9 +307,7 @@ window.cancelRequest = async (id) => {
 // C. DASHBOARD INITIALIZATION
 // ==========================================
 async function initDashboard(user) {
-    console.log("Initializing Dashboard for:", user.email);
     const borrowerInput = document.getElementById('borrower');
-    
     if (!user || !user.email) return;
 
     try {
@@ -347,7 +339,6 @@ async function initDashboard(user) {
             window.location.href = 'dashboard.html';
             return;
         }
-
         if (borrowerInput) {
             borrowerInput.value = currentUserName;
             borrowerInput.readOnly = true;
@@ -362,9 +353,6 @@ async function initDashboard(user) {
     }
 }
 
-// ==========================================
-// D. ISSUANCE & CART
-// ==========================================
 function updateClock() {
     const timeEl = document.getElementById('clockTime');
     const dateEl = document.getElementById('clockDate');
@@ -453,7 +441,6 @@ document.getElementById('issueBtn')?.addEventListener('click', async () => {
     } catch(e) { alert(e.message); }
 });
 
-// --- INVENTORY AUTOCOMPLETE ---
 async function loadInventory() {
     let list = document.getElementById('inventoryList');
     if (!list) {
@@ -506,17 +493,10 @@ document.getElementById('serial')?.addEventListener('change', (e) => {
     }
 });
 
-// ==========================================
-// E. RECORDS & TABLES & PAGINATION
-// ==========================================
 function loadAllRecords(user) {
-    const activeTbody = document.getElementById('activeTableBody');
-    const historyTbody = document.getElementById('historyTableBody');
     const isAdmin = user.email === ADMIN_EMAIL;
     
     const fetchRecords = async () => {
-        console.log("Fetching records...");
-        
         try {
             let query = supabase.from('gate_passes').select('*').eq('status', 'OUT').order('time_out', { ascending: false }).limit(1000);
             if (!isAdmin) query = query.eq('issuer_email', user.email);
@@ -530,12 +510,9 @@ function loadAllRecords(user) {
             if (hError) throw hError;
             if(hData) historyData = hData;
 
-            // Initially render both
             renderTable('active');
             renderTable('history');
-        } catch (e) {
-            console.error("Error fetching records:", e);
-        }
+        } catch (e) { console.error("Error fetching records:", e); }
     };
 
     window.refreshTableData = () => {
@@ -557,21 +534,15 @@ function renderTable(type) {
     if (!tbody) return;
     
     let filtered = rawData;
+    // FIX: SEARCH FILTER LOGIC
     if (state.filter) {
-        const term = state.filter;
+        const term = state.filter.toLowerCase();
         filtered = rawData.filter(item => {
-            // Search specific visible fields only to avoid matching hidden metadata like emails/status
+            // Search visible fields only
             const fields = [
-                item.unique_id, 
-                item.borrower, 
-                item.description, 
-                item.serial, 
-                item.property_no, 
-                item.asset_no, 
-                item.destination, 
-                item.project, 
-                item.guard_out, 
-                item.guard_in
+                item.unique_id, item.borrower, item.description, 
+                item.serial, item.property_no, item.asset_no, 
+                item.destination, item.project, item.guard_out, item.guard_in
             ];
             return fields.some(val => val && String(val).toLowerCase().includes(term));
         });
@@ -601,7 +572,6 @@ function renderTable(type) {
                     else if (data.due_date === today) { badge = '<span class="badge bg-warning text-dark">DUE TODAY</span>'; }
                 }
                 
-                // Allow Admin to Edit Due Date Inline
                 let dueDateCell = data.due_date || '-';
                 if (isAdmin) {
                     dueDateCell = `<input type="date" class="form-control form-control-sm border-warning" 
@@ -680,36 +650,29 @@ function renderPaginationControls(type, totalItems, totalPages) {
 window.changeLimit = (type, limit) => { paginationState[type].limit = parseInt(limit); paginationState[type].page = 1; renderTable(type); };
 window.changePage = (type, dir) => { paginationState[type].page += dir; renderTable(type); };
 
-// ADMIN FUNCTION: Update Due Date
 window.updateDueDate = async (id, newDate) => {
     if (!id || !newDate) return;
     if (!await showConfirm("Update", `Change due date to ${newDate}?`)) {
-        window.refreshTableData(); // Revert UI
+        window.refreshTableData();
         return;
     }
-
     try {
         const { error } = await supabase.from('gate_passes').update({ due_date: newDate }).eq('id', id);
         if (error) throw error;
         alert("Due date updated.");
         window.refreshTableData();
-    } catch (e) {
-        alert("Update failed: " + e.message);
-    }
+    } catch (e) { alert("Update failed: " + e.message); }
 };
 
 document.getElementById('tableSearch')?.addEventListener('input', (e) => {
     const activeTabButton = document.querySelector('.nav-link.active');
     const targetId = activeTabButton.getAttribute('data-bs-target');
     const type = targetId === '#activeTab' ? 'active' : 'history';
-    
-    // Update filter for current type
     paginationState[type].filter = e.target.value.toLowerCase();
     paginationState[type].page = 1; 
     renderTable(type);
 });
 
-// Return Logic with Manual Refresh
 document.getElementById('returnBtn')?.addEventListener('click', async () => {
     const s = document.getElementById('returnSerial').value;
     const g = document.getElementById('guardIn').value;
@@ -726,9 +689,6 @@ document.getElementById('returnBtn')?.addEventListener('click', async () => {
 });
 window.selectRow = (s) => document.getElementById('returnSerial').value = s;
 
-// ==========================================
-// F. UTILS & EXPORTS
-// ==========================================
 function updateSelectionCount() {
     const count = document.querySelectorAll('.export-check:checked').length;
     const l1 = document.getElementById('selectionCount');
@@ -749,7 +709,6 @@ document.getElementById('deselectAllBtn')?.addEventListener('click', () => toggl
 document.getElementById('selectAllHistoryBtn')?.addEventListener('click', () => toggleAll(true, 'historyTableBody'));
 document.getElementById('deselectAllHistoryBtn')?.addEventListener('click', () => toggleAll(false, 'historyTableBody'));
 
-// FIX: Get Selected Items based on EXPORT CONTEXT
 function getSelectedItems() {
     const containerId = currentExportContext === 'active' ? 'activeTableBody' : 'historyTableBody';
     const container = document.getElementById(containerId);
@@ -760,9 +719,8 @@ function getSelectedItems() {
     return Array.from(checkboxes).map(c => JSON.parse(decodeURIComponent(c.value)));
 }
 
-// Export Modals - Sets the context for getSelectedItems
 const openExportModal = (context) => {
-    currentExportContext = context; // Stores 'active' or 'history'
+    currentExportContext = context;
     const containerId = context === 'active' ? 'activeTableBody' : 'historyTableBody';
     const container = document.getElementById(containerId);
     const count = container ? container.querySelectorAll('.export-check:checked').length : 0;
@@ -775,56 +733,38 @@ const openExportModal = (context) => {
 document.getElementById('openExportModalBtn')?.addEventListener('click', () => openExportModal('active'));
 document.getElementById('openExportHistoryModalBtn')?.addEventListener('click', () => openExportModal('history'));
 
-// UPDATED: EXCEL EXPORT (Clean Format based on Table Columns)
+// HELPER: Close Export Modal before confirming
+const closeExportAndConfirm = async (actionName, message) => {
+    const exportModalEl = document.getElementById('exportModal');
+    const modalInstance = bootstrap.Modal.getInstance(exportModalEl) || new bootstrap.Modal(exportModalEl);
+    if(modalInstance) modalInstance.hide();
+    
+    // Small delay to ensure backdrop clears before next modal
+    await new Promise(r => setTimeout(r, 150));
+    return await showConfirm(actionName, message);
+};
+
 document.getElementById('btnExportExcel')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (!items.length) return;
 
-    // Check for different borrowers
     const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
-    if (borrowers.size > 1) {
-        return alert("Error: You cannot export multiple borrowers to the same file. Please select items for a single borrower only.");
-    }
+    if (borrowers.size > 1) return alert("Error: Select items for a single borrower only.");
 
     const borrowerName = items[0].borrower || "Unknown";
     
-    // Close modal BEFORE confirming
-    const exportModalEl = document.getElementById('exportModal');
-    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
-    if (modalInstance) modalInstance.hide();
+    if (!await closeExportAndConfirm("Export Excel", `Generate Excel file for ${borrowerName}?`)) return;
 
-    if (!await showConfirm("Export Excel", `Generate Excel file for ${borrowerName}?`)) return;
-
-    // Map to nice columns based on which table we are viewing
     const exportData = items.map(item => {
-        // Base columns shared by both
         const base = {
-            "Gate Pass ID": item.unique_id,
-            "Borrower": item.borrower,
-            "Description": item.description,
-            "Serial No.": item.serial,
-            "Property No.": item.property_no || '',
-            "Asset Tag": item.asset_no || '',
-            "Destination": item.destination,
-            "Project": item.project || '',
-            "Time Out": item.time_out ? new Date(item.time_out).toLocaleString() : ''
+            "Gate Pass ID": item.unique_id, "Borrower": item.borrower, "Description": item.description,
+            "Serial No.": item.serial, "Property No.": item.property_no || '', "Asset Tag": item.asset_no || '',
+            "Destination": item.destination, "Project": item.project || '', "Time Out": item.time_out ? new Date(item.time_out).toLocaleString() : ''
         };
-
         if (currentExportContext === 'active') {
-            return {
-                ...base,
-                "Guard Out": item.guard_out,
-                "Due Date": item.due_date || '',
-                "Status": item.status
-            };
+            return { ...base, "Guard Out": item.guard_out, "Due Date": item.due_date || '', "Status": item.status };
         } else {
-            // History Context
-            return {
-                ...base,
-                "Time Returned": item.time_return ? new Date(item.time_return).toLocaleString() : '',
-                "Guard In": item.guard_in,
-                "Status": item.status
-            };
+            return { ...base, "Time Returned": item.time_return ? new Date(item.time_return).toLocaleString() : '', "Guard In": item.guard_in, "Status": item.status };
         }
     });
 
@@ -838,31 +778,13 @@ document.getElementById('btnExportGatePass')?.addEventListener('click', async ()
     const items = getSelectedItems();
     if (items.length === 0) return;
 
-    // Check for different borrowers
     const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
-    if (borrowers.size > 1) {
-        return alert("Error: You cannot export multiple borrowers to the same Gate Pass. Please select items for a single borrower only.");
-    }
+    if (borrowers.size > 1) return alert("Error: Select items for a single borrower only.");
 
     const borrowerName = items[0].borrower || "Unknown";
+    if (!await closeExportAndConfirm("Export Gate Pass", `Generate Gate Pass PDF for ${borrowerName}?`)) return;
 
-    // Close modal BEFORE confirming
-    const exportModalEl = document.getElementById('exportModal');
-    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
-    if (modalInstance) modalInstance.hide();
-
-    if (!await showConfirm("Export Gate Pass", `Generate Gate Pass PDF for ${borrowerName}?`)) return;
-
-    const groupByBorrower = (arr) => {
-        return arr.reduce((acc, obj) => {
-            const key = obj.borrower;
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(obj);
-            return acc;
-        }, {});
-    };
-
-    const groupedItems = groupByBorrower(items);
+    const groupedItems = { [borrowerName]: items };
     const { jsPDF } = window.jspdf;
 
     Object.keys(groupedItems).forEach((borrowerName) => {
@@ -870,596 +792,213 @@ document.getElementById('btnExportGatePass')?.addEventListener('click', async ()
         const borrowerItems = groupedItems[borrowerName];
         const firstItem = borrowerItems[0];
 
-        // ===== FINAL FOOTER FUNCTION =====
         const stampFooter = () => {
             const pageHeight = doc.internal.pageSize.height;
             const pageWidth = doc.internal.pageSize.width;
-
             const footerY = pageHeight - 35;
-
-            doc.setFontSize(8);
-            doc.setFont("helvetica", "normal");
-
-            doc.setLineWidth(0.3);
-            doc.setDrawColor(0, 0, 0);
-
+            doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setLineWidth(0.3); doc.setDrawColor(0, 0, 0);
             doc.line(10, footerY - 5, 200, footerY - 5);
-
             doc.text("3rd Floor STWLPC Building, 335-338 Sen. Gil Puyat Avenue (Buendia)", 105, footerY, { align: "center" });
             doc.text("Barangay 49 Zone 7, Pasay City Philippines 1300", 105, footerY + 4, { align: "center" });
             doc.text("Telephone (632) 833-8284 • Telefax (632) 834-0051", 105, footerY + 8, { align: "center" });
             doc.text("Email Address: ncr5@psa.gov.ph, Website: www.psa.gov.ph", 105, footerY + 12, { align: "center" });
-
-            const pageNumber = doc.internal.getCurrentPageInfo().pageNumber;
-            doc.text(`Page ${pageNumber}`, pageWidth - 20, pageHeight - 10);
+            doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber}`, pageWidth - 20, pageHeight - 10);
         };
 
-        // ===== HEADER =====
-        doc.setTextColor(0, 0, 0);
-
-        doc.setFontSize(11);
+        doc.setTextColor(0, 0, 0); doc.setFontSize(11);
         doc.text("REPUBLIC OF THE PHILIPPINES", 105, 15, { align: "center" });
-
-        doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12); doc.setFont("helvetica", "bold");
         doc.text("PHILIPPINE STATISTICS AUTHORITY", 105, 20, { align: "center" });
-
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10); doc.setFont("helvetica", "normal");
         doc.text("NCR PROVINCIAL STATISTICAL OFFICE V", 105, 25, { align: "center" });
         doc.text("LAS PIÑAS MUNTINLUPA PARAÑAQUE PASAY", 105, 30, { align: "center" });
 
-        const dateStr = new Date().toLocaleDateString('en-US', {
-            month: 'long',
-            day: '2-digit',
-            year: 'numeric'
-        });
-
-        doc.text("Date:", 15, 45);
-        doc.text(dateStr, 25, 45);
-        doc.line(25, 46, 25 + doc.getTextWidth(dateStr), 46);
-
+        const dateStr = new Date().toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' });
+        doc.text("Date:", 15, 45); doc.text(dateStr, 25, 45); doc.line(25, 46, 25 + doc.getTextWidth(dateStr), 46);
         doc.text("GP No.: ", 140, 45);
-        const gpVal = firstItem.unique_id;
-        doc.text(gpVal, 155, 45);
-        doc.rect(153, 40, doc.getTextWidth(gpVal) + 4, 7);
-
+        doc.text(firstItem.unique_id, 155, 45); doc.rect(153, 40, doc.getTextWidth(firstItem.unique_id) + 4, 7);
         doc.text("Annex A", 170, 52);
 
-        // ===== BOLD + UNDERLINE STYLED TEXT SECTION =====
-        let currentX = 15;
-        let currentY = 60;
-        const lineHeight = 5;
-
+        let currentX = 15, currentY = 60;
         function printStyled(text, isBold = false) {
             doc.setFont("helvetica", isBold ? "bold" : "normal");
-
             const width = doc.getTextWidth(text);
-
-            if (currentX + width > 195) {
-                currentX = 15;
-                currentY += lineHeight;
-            }
-
+            if (currentX + width > 195) { currentX = 15; currentY += 5; }
             doc.text(text, currentX, currentY);
-
-            if (isBold) {
-                doc.setLineWidth(0.5);
-                doc.setDrawColor(0, 0, 0);
-                doc.line(currentX, currentY + 1, currentX + width, currentY + 1);
-            }
-
+            if (isBold) { doc.setLineWidth(0.5); doc.line(currentX, currentY + 1, currentX + width, currentY + 1); }
             currentX += width;
         }
 
-        printStyled("TO THE GUARD ON DUTY: Please allow ");
-        printStyled(firstItem.borrower || "__________", true);
-        printStyled(" to bring out property from PSA Office to ");
-        printStyled(firstItem.destination || "__________", true);
-        printStyled(" for the purpose of ");
-        printStyled(firstItem.project || "__________", true);
-        printStyled(".");
-
+        printStyled("TO THE GUARD ON DUTY: Please allow "); printStyled(firstItem.borrower || "__________", true);
+        printStyled(" to bring out property from PSA Office to "); printStyled(firstItem.destination || "__________", true);
+        printStyled(" for the purpose of "); printStyled(firstItem.project || "__________", true); printStyled(".");
         currentY += 15;
 
-        const formatTime = (t) => t ? new Date(t).toLocaleString() : '';
-
         const tableBody = borrowerItems.map(item => [
-            item.description,
-            item.serial,
-            item.property_no,
-            item.asset_no,
-            item.destination,
-            formatTime(item.time_out),
-            item.time_return ? formatTime(item.time_return) : ''
+            item.description, item.serial, item.property_no, item.asset_no, item.destination,
+            item.time_out ? new Date(item.time_out).toLocaleString() : '', item.time_return ? new Date(item.time_return).toLocaleString() : ''
         ]);
 
-        // ===== ULTRA DARK BLACK TABLE =====
         doc.autoTable({
             startY: currentY,
-
-            head: [[
-                'Description',
-                'Serial Number',
-                'Property Number',
-                'Asset Tag',
-                'Destination',
-                'Time Out',
-                'Time Returned'
-            ]],
-
-            body: tableBody,
-
-            theme: 'grid',
-
-            // MODIFIED: White Background, Black Text for Header
-            headStyles: {
-                fillColor: [255, 255, 255], // White background
-                textColor: [0, 0, 0],       // Black text
-                lineColor: [0, 0, 0],
-                lineWidth: 0.5
-            },
-
-            // FORCE BLACK TEXT EVERYWHERE
-            styles: {
-                textColor: [0, 0, 0],
-                lineColor: [0, 0, 0],
-                lineWidth: 0.4,
-                fontSize: 9
-            },
-
-            // BODY CELLS ALSO BLACK
-            bodyStyles: {
-                textColor: [0, 0, 0]
-            },
-
-            margin: {
-                bottom: 100
-            }
+            head: [['Description', 'Serial Number', 'Property Number', 'Asset Tag', 'Destination', 'Time Out', 'Time Returned']],
+            body: tableBody, theme: 'grid',
+            headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.5 },
+            styles: { textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.4, fontSize: 9 },
+            margin: { bottom: 100 }
         });
 
-        // ===== SIGNATORIES =====
         let finalY = doc.lastAutoTable.finalY + 15;
+        if (finalY > doc.internal.pageSize.height - 120) { doc.addPage(); finalY = 30; }
 
-        if (finalY > doc.internal.pageSize.height - 120) {
-            doc.addPage();
-            finalY = 30;
-        }
-
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
-
-        doc.text("Remarks:", 15, finalY);
-
-        finalY += 8;
-        doc.line(15, finalY, 195, finalY);
-        finalY += 8;
-        doc.line(15, finalY, 195, finalY);
-        finalY += 8;
-        doc.line(15, finalY, 195, finalY);
-
-        finalY += 20;
-
-        doc.text("Checked/Inspected by:", 15, finalY);
-
-        doc.line(15, finalY + 15, 80, finalY + 15);
-        doc.setFont("helvetica", "bold");
-        doc.text("JENOR B. BLAS", 15, finalY + 20);
-        doc.setFont("helvetica", "normal");
-        doc.text("Property and Supply Officer", 15, finalY + 25);
-
-        doc.line(100, finalY + 15, 165, finalY + 15);
-        doc.setFont("helvetica", "bold");
-        doc.text("MARY ANNE G. BASILIO", 100, finalY + 20);
-        doc.setFont("helvetica", "normal");
-        doc.text("Inspection Officer", 100, finalY + 25);
-
-        finalY += 40;
-
-        if (finalY > doc.internal.pageSize.height - 120) {
-            doc.addPage();
-            finalY = 30;
-        }
-
+        doc.setFontSize(10); doc.setTextColor(0, 0, 0); doc.text("Remarks:", 15, finalY);
+        finalY += 8; doc.line(15, finalY, 195, finalY); finalY += 8; doc.line(15, finalY, 195, finalY); finalY += 8; doc.line(15, finalY, 195, finalY);
+        finalY += 20; doc.text("Checked/Inspected by:", 15, finalY);
+        doc.line(15, finalY + 15, 80, finalY + 15); doc.setFont("helvetica", "bold"); doc.text("JENOR B. BLAS", 15, finalY + 20); doc.setFont("helvetica", "normal"); doc.text("Property and Supply Officer", 15, finalY + 25);
+        doc.line(100, finalY + 15, 165, finalY + 15); doc.setFont("helvetica", "bold"); doc.text("MARY ANNE G. BASILIO", 100, finalY + 20); doc.setFont("helvetica", "normal"); doc.text("Inspection Officer", 100, finalY + 25);
+        
+        finalY += 40; if (finalY > doc.internal.pageSize.height - 120) { doc.addPage(); finalY = 30; }
+        
         doc.text("Approved by:", 15, finalY);
+        doc.line(15, finalY + 15, 80, finalY + 15); doc.setFont("helvetica", "bold"); doc.text("MARICEL M. CARAGAN", 15, finalY + 20); doc.setFont("helvetica", "normal"); doc.text("Supervising Statistical Specialist,", 15, finalY + 25); doc.text("Officer-in-Charge, PSA NCR PSO V", 15, finalY + 30);
 
-        doc.line(15, finalY + 15, 80, finalY + 15);
-        doc.setFont("helvetica", "bold");
-        doc.text("MARICEL M. CARAGAN", 15, finalY + 20);
-        doc.setFont("helvetica", "normal");
-        doc.text("Supervising Statistical Specialist,", 15, finalY + 25);
-        doc.text("Officer-in-Charge, PSA NCR PSO V", 15, finalY + 30);
-
-        // ===== ADD FOOTER TO ALL PAGES LAST =====
         const totalPages = doc.internal.getNumberOfPages();
-
-        for (let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            stampFooter();
-        }
-
+        for (let i = 1; i <= totalPages; i++) { doc.setPage(i); stampFooter(); }
         doc.save(`GatePass_${borrowerName}_${firstItem.unique_id}.pdf`);
     });
 });
 
-// ==========================================
-// NEW: ACKNOWLEDGEMENT EXPORT
-// ==========================================
 document.getElementById('btnExportAckReceipt')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (items.length === 0) return;
 
-    // Check for different borrowers
     const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
-    if (borrowers.size > 1) {
-        return alert("Error: You cannot export multiple borrowers to the same Receipt. Please select items for a single borrower only.");
-    }
+    if (borrowers.size > 1) return alert("Error: Select items for a single borrower only.");
 
     const borrowerName = items[0].borrower || "Unknown";
+    if (!await closeExportAndConfirm("Export Receipt", `Generate Acknowledgement Receipt for ${borrowerName}?`)) return;
 
-    // Close modal BEFORE confirming
-    const exportModalEl = document.getElementById('exportModal');
-    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
-    if (modalInstance) modalInstance.hide();
-
-    if (!await showConfirm("Export Receipt", `Generate Acknowledgement Receipt for ${borrowerName}?`)) return;
-
-    // Auto-detect Project Name from the first selected item
-    // The user requested this be based on the logs/data
     const projectName = items[0].project || "N/A";
-
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'mm', 'a4'); // Portrait Mode
+    const doc = new jsPDF('p', 'mm', 'a4');
 
-    // --- Footer Logic (Same Image Content + Dynamic Page Numbering) ---
     const addFooter = (docInstance) => {
-        const pageCount = docInstance.internal.getNumberOfPages();
         const pageWidth = docInstance.internal.pageSize.width;
         const pageHeight = docInstance.internal.pageSize.height;
         const footerY = pageHeight - 20;
-
-        // Line
-        docInstance.setLineWidth(0.5);
-        docInstance.line(10, footerY - 5, pageWidth - 10, footerY - 5);
-
-        // Image Content Replicated as Text (High Quality)
-        docInstance.setFontSize(8);
-        docInstance.setFont("helvetica", "normal");
-        docInstance.setTextColor(0, 0, 0);
-
+        docInstance.setLineWidth(0.5); docInstance.line(10, footerY - 5, pageWidth - 10, footerY - 5);
+        docInstance.setFontSize(8); docInstance.setFont("helvetica", "normal"); docInstance.setTextColor(0, 0, 0);
         docInstance.text("3rd Floor STWLPC Building, 335-338 Sen. Gil Puyat Avenue (Buendia)", pageWidth / 2, footerY, { align: "center" });
         docInstance.text("Barangay 49 Zone 7, Pasay City Philippines 1300", pageWidth / 2, footerY + 4, { align: "center" });
         docInstance.text("Telephone (632) 833-8284 • Telefax (632) 834-0051", pageWidth / 2, footerY + 8, { align: "center" });
         docInstance.text("Email Address: ncr5@psa.gov.ph, Website: www.psa.gov.ph", pageWidth / 2, footerY + 12, { align: "center" });
     };
 
-    // --- Header ---
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Ref No.: 2026-0002", 15, 15); // Example Ref or could be auto-generated
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text("Ref No.: 2026-0002", 15, 15);
+    doc.setFontSize(11); doc.text("REPUBLIC OF THE PHILIPPINES", 105, 15, { align: "center" });
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("PHILIPPINE STATISTICS AUTHORITY", 105, 20, { align: "center" });
+    doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.text("Acknowledgment Form", 105, 30, { align: "center" });
 
-    doc.setFontSize(11);
-    doc.text("REPUBLIC OF THE PHILIPPINES", 105, 15, { align: "center" });
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("PHILIPPINE STATISTICS AUTHORITY", 105, 20, { align: "center" });
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text("Acknowledgment Form", 105, 30, { align: "center" });
-
-    // --- Body Text ---
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     const text1 = "All hired field-based personnel for the specified project listed below acknowledges the receipt of the following: a) tablet, b) accessories compatible case and adapter, and c) powerbank.";
-    
     const text2 = "All personnel who were given these devices will be held liable for any acts of negligence and malicious intent resulting to the loss or damage of these tablets. Should there be a lost/damaged tablet, the responsible personnel should immediately inform the incident to their immediate supervisor. Upon the evaluation of the Philippine Statistics Authority (PSA) Provincial Statistical Office (PSO) Chief Statistical Specialist (CSS), an anticipated cost required to repair the damage in the tablet must be shouldered by the liable personnel. In the event that the tablet is lost, a salary deduction equivalent to the market value of the comparable device must be charged against the responsible personnel. Due to this, it is crucial to exercise caution and care to the equipment/device entrusted by the PSA to every field-based personnel for the successful and secure operationalization.";
-
     const text3 = "Affixing your name and signature in the next page signifies that you hereby acknowledge the receipt of the above-listed devices/items under your name and fully understand the responsibilities attached to these.";
 
-    const splitText1 = doc.splitTextToSize(text1, 180);
-    doc.text(splitText1, 15, 40);
-
+    doc.text(doc.splitTextToSize(text1, 180), 15, 40);
     const splitText2 = doc.splitTextToSize(text2, 180);
     doc.text(splitText2, 15, 55);
-
     const splitText3 = doc.splitTextToSize(text3, 180);
-    // Calculate Y based on length of text2 (approx line height 4-5mm)
     let currentY = 55 + (splitText2.length * 5) + 5;
     doc.text(splitText3, 15, currentY);
-
     currentY += (splitText3.length * 5) + 10;
 
-    // Project Info (Auto-detected)
-    doc.setFont("helvetica", "bold");
-    doc.text(`Project: ${projectName}`, 15, currentY);
-    doc.text("Instructor: ___________________________", 15, currentY + 7);
-
+    doc.setFont("helvetica", "bold"); doc.text(`Project: ${projectName}`, 15, currentY); doc.text("Instructor: ___________________________", 15, currentY + 7);
     currentY += 15;
 
-    // --- Table Data Preparation (Auto-Detection) ---
     const tableData = items.map((item, index) => {
         let accessories = "-";
         const descLower = (item.description || "").toLowerCase();
-        
-        // Auto-detect "With Powerbank..." based on description
-        if (descLower.includes('tablet') || descLower.includes('samsung') || descLower.includes('ipad') || descLower.includes('tab')) {
-            accessories = "With Powerbank and/or Accessories";
-        } else if (descLower.includes('laptop')) {
-            accessories = "With Charger and Bag";
-        }
+        if (descLower.includes('tablet') || descLower.includes('samsung') || descLower.includes('ipad')) accessories = "With Powerbank and/or Accessories";
+        else if (descLower.includes('laptop')) accessories = "With Charger and Bag";
 
-        return [
-            index + 1,
-            "", // Name of Hired Based Personnel (Left Blank as requested)
-            (item.description && item.description.toLowerCase().includes('samsung')) ? "Samsung" : (item.description || ""),
-            item.serial,
-            item.asset_no || "",
-            // Tag Column REMOVED
-            accessories,
-            "", // Signature (Empty)
-            ""  // Date (Empty)
-        ];
+        return [index + 1, "", (item.description && item.description.toLowerCase().includes('samsung')) ? "Samsung" : (item.description || ""), item.serial, item.asset_no || "", accessories, "", ""];
     });
 
-    // --- Table Generation ---
     doc.autoTable({
         startY: currentY,
-        head: [[
-            "No.", 
-            "Name of Hired\nBased Personnel", 
-            "Tablet Brand", 
-            "Serial Number", 
-            "Asset Tag\nNumber", 
-            "With Powerbank\nand/or Accessories", 
-            "Signature", 
-            "Date of\nAcknowledgement"
-        ]],
-        body: tableData,
-        theme: 'grid',
-        headStyles: {
-            fillColor: [255, 255, 255],
-            textColor: [0, 0, 0],
-            lineColor: [0, 0, 0],
-            lineWidth: 0.3,
-            halign: 'center',
-            valign: 'middle',
-            fontStyle: 'bold',
-            fontSize: 8
-        },
-        styles: {
-            textColor: [0, 0, 0],
-            lineColor: [0, 0, 0],
-            lineWidth: 0.3,
-            fontSize: 8,
-            valign: 'middle'
-        },
-        columnStyles: {
-            0: { width: 10, halign: 'center' }, // No
-            1: { width: 35 }, // Name
-            2: { width: 20 }, // Brand
-            3: { width: 25 }, // Serial
-            4: { width: 20, halign: 'center' }, // Asset Tag Number (Slightly wider)
-            // Tag column removed (index shifted)
-            5: { width: 30, fontSize: 7 }, // Accessories (Wider to compensate)
-            6: { width: 25 }, // Signature
-            7: { width: 20 }  // Date
-        },
-        didDrawPage: function (data) {
-            // Footer on every page
-            addFooter(doc);
-        }
+        head: [["No.", "Name of Hired\nBased Personnel", "Tablet Brand", "Serial Number", "Asset Tag\nNumber", "With Powerbank\nand/or Accessories", "Signature", "Date of\nAcknowledgement"]],
+        body: tableData, theme: 'grid',
+        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.3, halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 8 },
+        styles: { textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.3, fontSize: 8, valign: 'middle' },
+        columnStyles: { 0: { width: 10, halign: 'center' }, 1: { width: 35 }, 2: { width: 20 }, 3: { width: 25 }, 4: { width: 20, halign: 'center' }, 5: { width: 30, fontSize: 7 }, 6: { width: 25 }, 7: { width: 20 } },
+        didDrawPage: function (data) { addFooter(doc); }
     });
 
-    // Add Page Numbers (Total Pages)
     const totalPages = doc.internal.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.text(`Page ${i} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 4);
+        doc.setPage(i); doc.setFontSize(8); doc.text(`Page ${i} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 4);
     }
-
     doc.save(`AcknowledgementReceipt_${projectName}_${new Date().toISOString().split('T')[0]}.pdf`);
 });
 
-// NEW: TRANSMITTAL EXPORT FUNCTIONALITY
 document.getElementById('btnExportTransmittal')?.addEventListener('click', async () => {
     const items = getSelectedItems();
     if (items.length === 0) return;
 
-    // Check for different borrowers
     const borrowers = new Set(items.map(i => (i.borrower || "").trim().toLowerCase()));
-    if (borrowers.size > 1) {
-        return alert("Error: You cannot export multiple borrowers to the same Transmittal. Please select items for a single borrower only.");
-    }
+    if (borrowers.size > 1) return alert("Error: Select items for a single borrower only.");
 
     const borrowerName = items[0].borrower || "Unknown";
+    if (!await closeExportAndConfirm("Export Transmittal", `Generate Transmittal Form for ${borrowerName}?`)) return;
 
-    // Close modal BEFORE confirming
-    const exportModalEl = document.getElementById('exportModal');
-    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
-    if (modalInstance) modalInstance.hide();
-
-    if (!await showConfirm("Export Transmittal", `Generate Transmittal Form for ${borrowerName}?`)) return;
-
-    // Group items by Destination
     const grouped = items.reduce((acc, item) => {
         const key = item.destination || 'Unspecified';
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(item);
-        return acc;
+        if (!acc[key]) acc[key] = []; acc[key].push(item); return acc;
     }, {});
 
     const { jsPDF } = window.jspdf;
-
     Object.keys(grouped).forEach(dest => {
         const doc = new jsPDF();
         const batch = grouped[dest];
-        
-        // Calculate Summary & Accessories Logic
         const summary = {};
+        
         batch.forEach(item => {
             const d = (item.description || "").toLowerCase();
-            let key = "Item";
-            
-            // Auto-detection logic for Accessories and Summary Count
-            if (d.includes('tablet') || d.includes('samsung') || d.includes('galaxy')) {
-                // Main Item
-                key = "Samsung Tablet";
-                summary[key] = (summary[key] || 0) + 1;
-                
-                // Implicit Accessories (Counted separately in summary)
-                summary["Adapter"] = (summary["Adapter"] || 0) + 1;
-                summary["Type C Cable"] = (summary["Type C Cable"] || 0) + 1;
-                summary["Box"] = (summary["Box"] || 0) + 1;
-                
-                // Row display
-                item._acc = "With type c cable, box and adapter";
-            } else if (d.includes('laptop')) {
-                key = "Laptop";
-                summary[key] = (summary[key] || 0) + 1;
-                summary["Charger"] = (summary["Charger"] || 0) + 1;
-                summary["Bag"] = (summary["Bag"] || 0) + 1;
-                item._acc = "With charger and bag";
-            } else {
-                key = item.description || "Equipment";
-                summary[key] = (summary[key] || 0) + 1;
-                item._acc = "-";
-            }
+            if (d.includes('tablet') || d.includes('samsung')) { summary["Samsung Tablet"] = (summary["Samsung Tablet"] || 0) + 1; summary["Adapter"] = (summary["Adapter"] || 0) + 1; summary["Type C Cable"] = (summary["Type C Cable"] || 0) + 1; summary["Box"] = (summary["Box"] || 0) + 1; item._acc = "With type c cable, box and adapter"; }
+            else if (d.includes('laptop')) { summary["Laptop"] = (summary["Laptop"] || 0) + 1; summary["Charger"] = (summary["Charger"] || 0) + 1; summary["Bag"] = (summary["Bag"] || 0) + 1; item._acc = "With charger and bag"; }
+            else { summary[item.description || "Equipment"] = (summary[item.description] || 0) + 1; item._acc = "-"; }
         });
 
-        // --- PDF LAYOUT ---
-        // Header
         doc.setFontSize(10); doc.setTextColor(0,0,0); doc.text("Republic of the Philippines", 105, 15, {align:'center'});
         doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.text("PHILIPPINE STATISTICS AUTHORITY", 105, 20, {align:'center'});
-        doc.setFontSize(10); doc.setFont("helvetica", "normal"); 
-        doc.text("2024 POPCEN-CBMS", 105, 25, {align:'center'});
-        doc.text(dest.toUpperCase(), 105, 30, {align:'center'});
-        
+        doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("2024 POPCEN-CBMS", 105, 25, {align:'center'}); doc.text(dest.toUpperCase(), 105, 30, {align:'center'});
         doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text("TRANSMITTAL / RECEIPT FORM", 105, 40, {align:'center'});
         doc.setFontSize(9); doc.setFont("helvetica", "italic"); doc.text("(Accomplish in duplicate copies)", 105, 45, {align:'center'});
 
-        // Summary Section (Top Left) - FULL WIDTH
         const summaryData = Object.entries(summary).map(([k, v]) => [k, v]);
-        doc.autoTable({
-            startY: 55,
-            head: [['ITEMS', 'QTY']],
-            body: summaryData,
-            theme: 'grid',
-            styles: { 
-                fontSize: 9, 
-                textColor: [0,0,0], 
-                lineColor: [0,0,0], 
-                lineWidth: 0.4 
-            },
-            headStyles: { 
-                fillColor: [220, 220, 220], 
-                textColor: [0,0,0], 
-                fontStyle: 'bold', 
-                halign: 'center', 
-                lineColor: [0,0,0], 
-                lineWidth: 0.4 
-            },
-            columnStyles: { 0: { halign: 'left' }, 1: { width: 30, halign: 'center' } }, // First column stretches, second fixed width
-        });
+        doc.autoTable({ startY: 55, head: [['ITEMS', 'QTY']], body: summaryData, theme: 'grid', styles: { fontSize: 9, textColor: [0,0,0], lineColor: [0,0,0], lineWidth: 0.4 }, headStyles: { fillColor: [220, 220, 220], textColor: [0,0,0], fontStyle: 'bold', halign: 'center', lineColor: [0,0,0], lineWidth: 0.4 }, columnStyles: { 0: { halign: 'left' }, 1: { width: 30, halign: 'center' } } });
 
-        // Main Table starts after summary
-        let mainY = doc.lastAutoTable.finalY + 10;
+        const tableBody = batch.map((item, i) => [i + 1, `${item.description}\n\n${item.serial}`, item.asset_no || '', '1', item._acc]);
+        doc.autoTable({ startY: doc.lastAutoTable.finalY + 10, head: [['No.', 'SERIAL No. / ITEM NAME', 'ASSET TAG No.', 'UNIT', 'ACCESSORIES']], body: tableBody, theme: 'grid', headStyles: { fillColor: [255, 255, 255], textColor: [0,0,0], lineColor: [0,0,0], lineWidth: 0.4, halign: 'center', valign: 'middle', fontStyle: 'bold' }, styles: { textColor: [0,0,0], lineColor: [0,0,0], lineWidth: 0.4, valign: 'middle', cellPadding: 3 }, columnStyles: { 0: { halign: 'center', width: 10 }, 1: { width: 80 }, 2: { halign: 'center' }, 3: { halign: 'center', width: 15 }, 4: { width: 50 } } });
 
-        const tableBody = batch.map((item, i) => [
-            i + 1,
-            `${item.description}\n\n${item.serial}`, // Combined Stacked Item/Serial
-            item.asset_no || '',
-            '1',
-            item._acc
-        ]);
-
-        doc.autoTable({
-            startY: mainY,
-            head: [['No.', 'SERIAL No. / ITEM NAME', 'ASSET TAG No.', 'UNIT', 'ACCESSORIES']],
-            body: tableBody,
-            theme: 'grid',
-            headStyles: { 
-                fillColor: [255, 255, 255], 
-                textColor: [0,0,0], 
-                lineColor: [0,0,0], 
-                lineWidth: 0.4, 
-                halign: 'center',
-                valign: 'middle',
-                fontStyle: 'bold'
-            },
-            styles: { 
-                textColor: [0,0,0], 
-                lineColor: [0,0,0], 
-                lineWidth: 0.4,
-                valign: 'middle',
-                cellPadding: 3
-            },
-            columnStyles: {
-                0: { halign: 'center', width: 10 },
-                1: { width: 80 },
-                2: { halign: 'center' },
-                3: { halign: 'center', width: 15 },
-                4: { width: 50 }
-            }
-        });
-
-        // Signatories Section - SIDE BY SIDE BUT WITH DETAILED BLOCK STRUCTURE
         let finalY = doc.lastAutoTable.finalY + 20;
+        if (finalY + 50 > doc.internal.pageSize.height - 20) { doc.addPage(); finalY = 40; }
 
-        // Check page break once for both
-        if (finalY + 50 > doc.internal.pageSize.height - 20) {
-            doc.addPage();
-            finalY = 40;
-        }
-
-        doc.setFontSize(10);
-        doc.setTextColor(0,0,0);
-        
-        // Helper to draw a full signature block at a specific X
         const drawSigBlock = (x, label) => {
-            let currentBlockY = finalY; // Start from same Y for both
-            
-            doc.text(label + ":", x, currentBlockY);
-            currentBlockY += 15; // Space before line
-            
-            doc.setLineWidth(0.5);
-            doc.setDrawColor(0,0,0);
-            doc.line(x, currentBlockY, x + 80, currentBlockY); // Signature Line
-            doc.setFontSize(8);
-            doc.text("SIGNATURE OVER PRINTED NAME", x + 40, currentBlockY + 5, {align:'center'});
-            
-            currentBlockY += 15; // Space for next line
-            doc.line(x, currentBlockY, x + 80, currentBlockY); // Position Line
-            doc.text("POSITION / DESIGNATION", x + 40, currentBlockY + 5, {align:'center'});
-
-            currentBlockY += 15; // Space for next line
-            doc.line(x, currentBlockY, x + 80, currentBlockY); // Date Line
-            doc.text("DATE SIGNED", x + 40, currentBlockY + 5, {align:'center'});
-            
-            doc.setFontSize(10);
+            let currentBlockY = finalY; doc.text(label + ":", x, currentBlockY); currentBlockY += 15;
+            doc.setLineWidth(0.5); doc.setDrawColor(0,0,0); doc.line(x, currentBlockY, x + 80, currentBlockY);
+            doc.setFontSize(8); doc.text("SIGNATURE OVER PRINTED NAME", x + 40, currentBlockY + 5, {align:'center'}); currentBlockY += 15;
+            doc.line(x, currentBlockY, x + 80, currentBlockY); doc.text("POSITION / DESIGNATION", x + 40, currentBlockY + 5, {align:'center'}); currentBlockY += 15;
+            doc.line(x, currentBlockY, x + 80, currentBlockY); doc.text("DATE SIGNED", x + 40, currentBlockY + 5, {align:'center'}); doc.setFontSize(10);
         };
+        drawSigBlock(15, "Transmitted by"); drawSigBlock(115, "Received by");
 
-        // Draw Left Block
-        drawSigBlock(15, "Transmitted by");
-        // Draw Right Block
-        drawSigBlock(115, "Received by");
-
-        // ===== ADD PAGE NUMBERS TO ALL PAGES =====
         const totalPages = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8);
-            doc.setTextColor(0, 0, 0);
-            doc.text(`Page ${i} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10);
-        }
-
+        for (let i = 1; i <= totalPages; i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(0, 0, 0); doc.text(`Page ${i} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10); }
         doc.save(`Transmittal_${dest}_${new Date().toISOString().split('T')[0]}.pdf`);
     });
 });
 
-// Import Logic
 const processImportBtn = document.getElementById('processImportBtn');
 const saveBulkBtn = document.getElementById('saveBulkBtn');
 
@@ -1472,30 +1011,27 @@ if (processImportBtn) {
             const data = new Uint8Array(e.target.result);
             const wb = XLSX.read(data, {type: 'array'});
             const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-            
-            bulkImportData = json.map(row => ({
-                serial: row['serial_no'] || row['Serial'],
-                description: row['description'] || row['Description'],
-                asset_no: row['asset_no'] || row['Asset'],
-                property_no: row['property_no'] || row['Property']
-            })).filter(x => x.serial);
-
+            bulkImportData = json.map(row => ({ serial: row['serial_no'] || row['Serial'], description: row['description'] || row['Description'], asset_no: row['asset_no'] || row['Asset'], property_no: row['property_no'] || row['Property'] })).filter(x => x.serial);
             const tbody = document.getElementById('importBody');
             tbody.innerHTML = "";
-            bulkImportData.slice(0, 5).forEach(d => {
-                tbody.innerHTML += `<tr><td>${d.serial}</td><td>${d.property_no}</td><td>${d.description}</td><td>${d.asset_no}</td></tr>`;
-            });
+            bulkImportData.slice(0, 5).forEach(d => { tbody.innerHTML += `<tr><td>${d.serial}</td><td>${d.property_no}</td><td>${d.description}</td><td>${d.asset_no}</td></tr>`; });
             document.getElementById('importPreview').style.display='block';
             document.getElementById('saveBulkBtn').style.display='block';
         };
         r.readAsArrayBuffer(f);
     });
 }
-document.getElementById('saveBulkBtn')?.addEventListener('click', async () => {
-    if(!bulkImportData.length) return;
-    if(!await showConfirm("Import", `Save ${bulkImportData.length} items?`)) return;
-    
-    const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
-    if(error) alert("Error: " + error.message);
-    else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
+if(saveBulkBtn) {
+    saveBulkBtn.addEventListener('click', async () => {
+        if(!bulkImportData.length) return;
+        if(!await showConfirm("Import", `Save ${bulkImportData.length} items?`)) return;
+        const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
+        if(error) alert("Error: " + error.message);
+        else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
+    });
+}
+
+// CRITICAL: Ensure initialization only after DOM is ready
+window.addEventListener('DOMContentLoaded', () => {
+    checkUserSession();
 });
