@@ -237,26 +237,38 @@ async function handleSignup(e) {
         }
 
         // 2. Insert into 'registration_requests' (Admin Queue)
-        // NOTE: If RLS is enabled, you MUST have a policy allowing INSERT for 'anon' users
+        // CHANGED: Removed upsert to avoid Unique Constraint error. Using insert.
         const { error: reqError } = await supabase
             .from('registration_requests')
-            .upsert([{ name, email, pass, status: 'PENDING' }], { onConflict: 'email' });
+            .insert([{ name, email, pass, status: 'PENDING' }]);
         
         if (reqError) {
-             console.error("Registration Request Error:", reqError);
-             throw new Error("Registration DB Error: " + reqError.message + " (Check RLS Policies)");
+             // Handle duplicate manually if needed, or just show error
+             if (reqError.code === '23505') { // Unique violation code
+                console.warn("Request already exists, proceeding...");
+             } else {
+                console.error("Registration Request Error:", reqError);
+                throw new Error("Registration DB Error: " + reqError.message);
+             }
         }
         
         // 3. Insert into 'users' (Public Profile)
         // Use .id if available, otherwise try to fetch it if authData user is null (case: already registered)
         let userId = authData.user ? authData.user.id : null;
         
+        // CHANGED: Removed upsert to avoid Unique Constraint error. Using insert.
         const { error: userError } = await supabase.from('users')
-            .upsert([{ 
+            .insert([{ 
                 email, name, password: pass, approved: false, role: 'user', uid: userId 
-            }], { onConflict: 'email' });
+            }]);
 
-        if (userError) console.error("Profile warning:", userError);
+        if (userError) {
+             if (userError.code === '23505') {
+                 console.warn("User profile already exists.");
+             } else {
+                 console.error("Profile warning:", userError);
+             }
+        }
 
         alert("Request submitted! Wait for Admin approval.");
         await supabase.auth.signOut(); 
@@ -328,11 +340,21 @@ async function loadRegistrationRequests() {
 window.approveUser = async (reqId, email, name, password) => {
     if (!await showConfirm("Approve", `Approve ${email}?`)) return;
     try {
-        const { error: upsertError } = await supabase.from('users').upsert({
-            email: email, name: name, password: password, approved: true, role: 'user'
-        }, { onConflict: 'email' });
+        // CHANGED: Using UPDATE instead of UPSERT to avoid Unique Constraint errors
+        // We assume the user entry was created during signup (unapproved).
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ approved: true, role: 'user' })
+            .eq('email', email);
 
-        if (upsertError) throw upsertError;
+        if (updateError) {
+             // Fallback: If for some reason user doesn't exist, try Insert
+             console.warn("Update failed, trying insert...", updateError);
+             const { error: insertError } = await supabase.from('users').insert([{
+                 email: email, name: name, password: password, approved: true, role: 'user'
+             }]);
+             if (insertError) throw insertError;
+        }
 
         await supabase.from('registration_requests').delete().eq('id', reqId);
         alert("User Approved!");
