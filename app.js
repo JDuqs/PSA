@@ -33,14 +33,46 @@ function showConfirm(title, message) {
         const titleEl = document.getElementById('confirmTitle');
         const textEl = document.getElementById('confirmText');
         const yesBtn = document.getElementById('confirmBtnYes');
+        const cancelBtn = modalEl.querySelector('.btn-secondary'); // Get cancel button
         
         titleEl.innerText = title;
         textEl.innerText = message;
+        
+        // Create modal instance
         const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
         modal.show();
 
-        yesBtn.onclick = () => { modal.hide(); resolve(true); };
-        modalEl.addEventListener('hidden.bs.modal', () => { resolve(false); }, { once: true });
+        // Handle Confirm
+        const handleConfirm = () => {
+            modal.hide();
+            cleanup();
+            resolve(true);
+        };
+
+        // Handle Cancel
+        const handleCancel = () => {
+            modal.hide(); // Bootstrap handles removal, but good to be explicit if needed
+            cleanup();
+            resolve(false);
+        };
+
+        // Cleanup listeners to avoid duplicates if modal is reused (though we create new instance here)
+        const cleanup = () => {
+            yesBtn.onclick = null;
+            cancelBtn.onclick = null; // Clear cancel listener too
+            modalEl.removeEventListener('hidden.bs.modal', handleCancelModalEvent);
+        };
+
+        // Event listener for when modal is hidden via other means (keyboard, backdrop if enabled)
+        const handleCancelModalEvent = () => {
+            resolve(false);
+        };
+
+        yesBtn.onclick = handleConfirm;
+        cancelBtn.onclick = handleCancel; // Attach to Cancel button
+        
+        // Safety net: if they click X or escape (if allowed)
+        modalEl.addEventListener('hidden.bs.modal', handleCancelModalEvent, { once: true });
     });
 }
 
@@ -498,6 +530,7 @@ function loadAllRecords(user) {
             if (hError) throw hError;
             if(hData) historyData = hData;
 
+            // Initially render both
             renderTable('active');
             renderTable('history');
         } catch (e) {
@@ -654,8 +687,11 @@ window.updateDueDate = async (id, newDate) => {
 };
 
 document.getElementById('tableSearch')?.addEventListener('input', (e) => {
-    const activeTab = document.querySelector('.tab-pane.active');
-    const type = activeTab.id === 'activeTab' ? 'active' : 'history';
+    const activeTabButton = document.querySelector('.nav-link.active');
+    const targetId = activeTabButton.getAttribute('data-bs-target');
+    const type = targetId === '#activeTab' ? 'active' : 'history';
+    
+    // Update filter for current type
     paginationState[type].filter = e.target.value.toLowerCase();
     paginationState[type].page = 1; 
     renderTable(type);
@@ -740,6 +776,11 @@ document.getElementById('btnExportExcel')?.addEventListener('click', async () =>
 
     const borrowerName = items[0].borrower || "Unknown";
     
+    // Close modal BEFORE confirming
+    const exportModalEl = document.getElementById('exportModal');
+    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
+    if (modalInstance) modalInstance.hide();
+
     if (!await showConfirm("Export Excel", `Generate Excel file for ${borrowerName}?`)) return;
 
     // Map to nice columns based on which table we are viewing
@@ -792,6 +833,12 @@ document.getElementById('btnExportGatePass')?.addEventListener('click', async ()
     }
 
     const borrowerName = items[0].borrower || "Unknown";
+
+    // Close modal BEFORE confirming
+    const exportModalEl = document.getElementById('exportModal');
+    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
+    if (modalInstance) modalInstance.hide();
+
     if (!await showConfirm("Export Gate Pass", `Generate Gate Pass PDF for ${borrowerName}?`)) return;
 
     const groupByBorrower = (arr) => {
@@ -1037,6 +1084,12 @@ document.getElementById('btnExportAckReceipt')?.addEventListener('click', async 
     }
 
     const borrowerName = items[0].borrower || "Unknown";
+
+    // Close modal BEFORE confirming
+    const exportModalEl = document.getElementById('exportModal');
+    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
+    if (modalInstance) modalInstance.hide();
+
     if (!await showConfirm("Export Receipt", `Generate Acknowledgement Receipt for ${borrowerName}?`)) return;
 
     // Auto-detect Project Name from the first selected item
@@ -1210,6 +1263,12 @@ document.getElementById('btnExportTransmittal')?.addEventListener('click', async
     }
 
     const borrowerName = items[0].borrower || "Unknown";
+
+    // Close modal BEFORE confirming
+    const exportModalEl = document.getElementById('exportModal');
+    const modalInstance = bootstrap.Modal.getInstance(exportModalEl);
+    if (modalInstance) modalInstance.hide();
+
     if (!await showConfirm("Export Transmittal", `Generate Transmittal Form for ${borrowerName}?`)) return;
 
     // Group items by Destination
