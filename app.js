@@ -257,15 +257,20 @@ window.approveUser = async (reqId, email, name, password) => {
         if (upsertError) throw upsertError;
 
         await supabase.from('registration_requests').delete().eq('id', reqId);
-        alert("User Approved!");
-        if (window.location.href.includes('admin.html')) loadRegistrationRequests();
+        alert("User Approved! Refreshing...");
+        // FORCE RELOAD TO UPDATE UI STATE CLEANLY
+        window.location.reload(); 
     } catch (e) { alert(e.message); }
 };
 
 window.cancelRequest = async (id) => {
     if (await showConfirm("Reject", "Delete this request?")) {
-        await supabase.from('registration_requests').delete().eq('id', id);
-        if (window.location.href.includes('admin.html')) loadRegistrationRequests();
+        try {
+            await supabase.from('registration_requests').delete().eq('id', id);
+            alert("Request rejected.");
+            // FORCE RELOAD TO UPDATE UI STATE CLEANLY
+            window.location.reload();
+        } catch (e) { alert(e.message); }
     }
 };
 
@@ -275,9 +280,20 @@ window.cancelRequest = async (id) => {
 async function initDashboard(user) {
     const borrowerInput = document.getElementById('borrower');
     
-    const { data: userProfile } = await supabase.from('users').select('name').eq('email', user.email).single();
-    if (userProfile) currentUserName = userProfile.name;
-    else currentUserName = user.email.split('@')[0];
+    // Safety check for user.email
+    if (!user || !user.email) {
+        console.error("User object missing in initDashboard");
+        return;
+    }
+
+    try {
+        const { data: userProfile } = await supabase.from('users').select('name').eq('email', user.email).single();
+        if (userProfile) currentUserName = userProfile.name;
+        else currentUserName = user.email.split('@')[0];
+    } catch (e) {
+        console.warn("Could not fetch user profile, using email fallback.");
+        currentUserName = user.email.split('@')[0];
+    }
 
     // Update User Indicator on Dashboard
     const userDisplay = document.getElementById('currentUserDisplay');
