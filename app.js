@@ -212,7 +212,6 @@ async function loadRegistrationRequests() {
     const tbody = document.getElementById('requestTableBody');
     const section = document.getElementById('adminRequestSection');
     
-    // Safety Check: If we are not on the admin page, do nothing
     if (!tbody) {
         console.warn("loadRegistrationRequests called, but requestTableBody not found. (Not on admin.html?)");
         return;
@@ -312,7 +311,6 @@ async function initDashboard(user) {
             borrowerInput.placeholder = "Enter Borrower's Name";
         }
     } else {
-        // Prevent non-admin accessing admin features via URL hacking
         if (window.location.href.includes('admin')) {
             window.location.href = 'dashboard.html';
             return;
@@ -546,6 +544,7 @@ function renderTable(type) {
         tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3">No records found.</td></tr>`;
     } else {
         const today = new Date().toISOString().split('T')[0];
+        const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
         
         paginatedItems.forEach(data => {
             const safeData = encodeURIComponent(JSON.stringify(data));
@@ -557,13 +556,24 @@ function renderTable(type) {
                     else if (data.due_date === today) { badge = '<span class="badge bg-warning text-dark">DUE TODAY</span>'; }
                 }
                 
+                // Allow Admin to Edit Due Date Inline
+                let dueDateCell = data.due_date || '-';
+                if (isAdmin) {
+                    dueDateCell = `<input type="date" class="form-control form-control-sm border-warning" 
+                                    style="min-width:130px; font-size: 0.8rem;"
+                                    value="${data.due_date || ''}" 
+                                    onchange="window.updateDueDate('${data.id}', this.value)" 
+                                    onclick="event.stopPropagation()">`;
+                }
+
                 tbody.innerHTML += `
                 <tr onclick="window.selectRow('${data.serial}')" style="cursor:pointer">
                     <td onclick="event.stopPropagation()"><input type="checkbox" class="export-check" value="${safeData}"></td>
                     <td class="fw-bold text-primary">${data.unique_id}</td>
                     <td>${data.borrower}</td><td>${data.description}</td><td>${data.serial}</td><td>${data.property_no||'-'}</td><td>${data.asset_no}</td>
                     <td>${data.destination}</td><td>${data.project}</td>
-                    <td>${new Date(data.time_out).toLocaleString()}</td><td>${data.guard_out}</td><td>${data.due_date||'-'}</td>
+                    <td>${new Date(data.time_out).toLocaleString()}</td><td>${data.guard_out}</td>
+                    <td onclick="event.stopPropagation()">${dueDateCell}</td>
                     <td>${badge}</td>
                 </tr>`;
             } else {
@@ -624,6 +634,24 @@ function renderPaginationControls(type, totalItems, totalPages) {
 
 window.changeLimit = (type, limit) => { paginationState[type].limit = parseInt(limit); paginationState[type].page = 1; renderTable(type); };
 window.changePage = (type, dir) => { paginationState[type].page += dir; renderTable(type); };
+
+// ADMIN FUNCTION: Update Due Date
+window.updateDueDate = async (id, newDate) => {
+    if (!id || !newDate) return;
+    if (!await showConfirm("Update", `Change due date to ${newDate}?`)) {
+        window.refreshTableData(); // Revert UI
+        return;
+    }
+
+    try {
+        const { error } = await supabase.from('gate_passes').update({ due_date: newDate }).eq('id', id);
+        if (error) throw error;
+        alert("Due date updated.");
+        window.refreshTableData();
+    } catch (e) {
+        alert("Update failed: " + e.message);
+    }
+};
 
 document.getElementById('tableSearch')?.addEventListener('input', (e) => {
     const activeTab = document.querySelector('.tab-pane.active');
@@ -699,9 +727,48 @@ const openExportModal = (context) => {
 document.getElementById('openExportModalBtn')?.addEventListener('click', () => openExportModal('active'));
 document.getElementById('openExportHistoryModalBtn')?.addEventListener('click', () => openExportModal('history'));
 
+// UPDATED: EXCEL EXPORT (Clean Format based on Table Columns)
 document.getElementById('btnExportExcel')?.addEventListener('click', () => {
-    const i = getSelectedItems(); if(!i.length) return;
-    XLSX.writeFile(XLSX.utils.json_to_sheet(i), "PSA_Export.xlsx");
+    const items = getSelectedItems();
+    if (!items.length) return;
+
+    // Map to nice columns based on which table we are viewing
+    const exportData = items.map(item => {
+        // Base columns shared by both
+        const base = {
+            "Gate Pass ID": item.unique_id,
+            "Borrower": item.borrower,
+            "Description": item.description,
+            "Serial No.": item.serial,
+            "Property No.": item.property_no || '',
+            "Asset Tag": item.asset_no || '',
+            "Destination": item.destination,
+            "Project": item.project || '',
+            "Time Out": item.time_out ? new Date(item.time_out).toLocaleString() : ''
+        };
+
+        if (currentExportContext === 'active') {
+            return {
+                ...base,
+                "Guard Out": item.guard_out,
+                "Due Date": item.due_date || '',
+                "Status": item.status
+            };
+        } else {
+            // History Context
+            return {
+                ...base,
+                "Time Returned": item.time_return ? new Date(item.time_return).toLocaleString() : '',
+                "Guard In": item.guard_in,
+                "Status": item.status
+            };
+        }
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Logs");
+    XLSX.writeFile(wb, `PSA_Logs_${currentExportContext}_${new Date().toISOString().split('T')[0]}.xlsx`);
 });
 
 document.getElementById('btnExportGatePass')?.addEventListener('click', () => {
