@@ -247,14 +247,19 @@ async function handleSignup(e) {
         if (authError) throw authError;
 
         // Note: With RLS, 'anon' (unauthenticated) role must have INSERT permission on 'registration_requests'
-        await supabase.from('registration_requests').insert([{ name, email, pass, status: 'PENDING' }]);
+        const { error: reqError } = await supabase.from('registration_requests').insert([{ name, email, pass, status: 'PENDING' }]);
         
-        const uid = authData.user ? authData.user.uid : null;
+        // CRITICAL FIX: If the request table fails (e.g., due to RLS), stop and alert the user.
+        if (reqError) {
+             console.error("Registration Request Error:", reqError);
+             throw new Error("Registration Failed: " + reqError.message);
+        }
         
-        // Note: With RLS, users can usually only insert their OWN rows. 
-        // We include UID here to ensure it matches the authenticated user.
+        // Fix: Use .id (Supabase standard) not .uid
+        const userId = authData.user ? authData.user.id : null;
+        
         const { error: userError } = await supabase.from('users').insert([{ 
-            email, name, password: pass, approved: false, role: 'user', uid: uid
+            email, name, password: pass, approved: false, role: 'user', uid: userId
         }]);
 
         if (userError) console.error("Profile creation warning:", userError);
@@ -267,6 +272,7 @@ async function handleSignup(e) {
         if (error.message.includes("rate limit") || error.status === 429) {
             alert("Signup Limit: Please wait or ask Admin.");
         } else {
+            // Show the actual error (like permission denied)
             alert("Error: " + error.message);
         }
         if(btn) { btn.disabled = false; btn.innerText = "SUBMIT ACCESS REQUEST"; }
