@@ -156,6 +156,18 @@ async function handleLogin(e) {
             throw error;
         }
 
+        // --- SINGLE SESSION ENFORCEMENT START ---
+        // 1. Generate unique session token
+        const sessionToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+        
+        // 2. Update 'users' table with this token
+        // IMPORTANT: You must have a 'session_token' column in your 'users' table
+        await supabase.from('users').update({ session_token: sessionToken }).eq('email', email);
+        
+        // 3. Store locally to identify this device
+        localStorage.setItem('session_token', sessionToken);
+        // --- SINGLE SESSION ENFORCEMENT END ---
+
         window.location.href = 'dashboard.html';
 
     } catch (error) {
@@ -176,6 +188,7 @@ if (loginForm) loginForm.addEventListener('submit', handleLogin);
 if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
         await supabase.auth.signOut();
+        localStorage.removeItem('session_token'); // Clear token
         window.location.href = 'index.html';
     });
 }
@@ -350,7 +363,30 @@ async function initDashboard(user) {
         loadAllRecords(user);
         loadInventory(); 
         updateClock();
-        initSearchListeners(); // Initialize new search logic
+        initSearchListeners(); 
+
+        // --- SINGLE SESSION POLLING ---
+        // Checks every 5 seconds if the session token in DB matches this device
+        setInterval(async () => {
+            if (document.hidden) return; 
+
+            const localToken = localStorage.getItem('session_token');
+            if (!localToken) return; 
+
+            const { data: userSession } = await supabase
+                .from('users')
+                .select('session_token')
+                .eq('email', user.email)
+                .single();
+
+            // If DB token exists and is DIFFERENT from local, it means another login happened
+            if (userSession && userSession.session_token && userSession.session_token !== localToken) {
+                alert("Session Expired: You have been logged in on another device.");
+                await supabase.auth.signOut();
+                localStorage.removeItem('session_token');
+                window.location.href = 'index.html';
+            }
+        }, 5000);
     }
 }
 
@@ -499,7 +535,7 @@ function loadAllRecords(user) {
     
     const fetchRecords = async () => {
         try {
-            // 1. Capture current selections before fetching/rendering to prevent clearing them
+            // 1. Capture current selections
             const getSelectedIds = (tbodyId) => {
                 const checked = document.querySelectorAll(`#${tbodyId} .export-check:checked`);
                 return Array.from(checked).map(cb => {
@@ -566,7 +602,7 @@ function loadAllRecords(user) {
     // Initial Load
     fetchRecords();
 
-    // POLLING: Refresh every 5 seconds (Silently)
+    // POLLING: Refresh records every 5 seconds (Silently)
     setInterval(() => {
         // Only fetch if the tab is visible to save resources
         if (!document.hidden) {
@@ -585,16 +621,13 @@ function renderTable(type) {
     
     let filtered = rawData;
     
-    // === REVISED SEARCH LOGIC ===
     if (state.filter) {
         const term = state.filter.toLowerCase();
         filtered = rawData.filter(item => {
-            // Prepare formatted dates for search visibility
             const formattedTimeOut = item.time_out ? new Date(item.time_out).toLocaleString() : '';
             const formattedTimeReturn = item.time_return ? new Date(item.time_return).toLocaleString() : '';
-            const formattedDueDate = item.due_date ? item.due_date : ''; // usually already string YYYY-MM-DD
+            const formattedDueDate = item.due_date ? item.due_date : ''; 
 
-            // Search visible fields only
             const fields = [
                 item.unique_id, item.borrower, item.description, 
                 item.serial, item.property_no, item.asset_no, 
