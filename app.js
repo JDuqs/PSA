@@ -679,19 +679,17 @@ function initSearchListeners() {
     const searchBox = document.getElementById('tableSearch');
     if (searchBox) {
         searchBox.addEventListener('input', (e) => {
-            const activeTabButton = document.querySelector('.nav-link.active');
-            let type = 'active'; // Default
-            if(activeTabButton) {
-                const targetId = activeTabButton.getAttribute('data-bs-target');
-                // Check if targetId contains 'history', else assume active
-                if(targetId && targetId.includes('history')) {
-                    type = 'history';
-                }
-            }
+            const term = e.target.value.toLowerCase();
             
-            paginationState[type].filter = e.target.value.toLowerCase();
-            paginationState[type].page = 1; 
-            renderTable(type);
+            // Update Active Log
+            paginationState.active.filter = term;
+            paginationState.active.page = 1;
+            renderTable('active');
+
+            // Update History Log
+            paginationState.history.filter = term;
+            paginationState.history.page = 1;
+            renderTable('history');
         });
     }
 
