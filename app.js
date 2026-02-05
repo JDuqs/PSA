@@ -558,11 +558,23 @@ function renderTable(type) {
     
     let filtered = rawData;
     if (state.filter) {
-        filtered = rawData.filter(item => 
-            Object.values(item).some(val => 
-                String(val).toLowerCase().includes(state.filter)
-            )
-        );
+        const term = state.filter;
+        filtered = rawData.filter(item => {
+            // Search specific visible fields only to avoid matching hidden metadata like emails/status
+            const fields = [
+                item.unique_id, 
+                item.borrower, 
+                item.description, 
+                item.serial, 
+                item.property_no, 
+                item.asset_no, 
+                item.destination, 
+                item.project, 
+                item.guard_out, 
+                item.guard_in
+            ];
+            return fields.some(val => val && String(val).toLowerCase().includes(term));
+        });
     }
     
     const totalItems = filtered.length;
@@ -1486,9 +1498,4 @@ document.getElementById('saveBulkBtn')?.addEventListener('click', async () => {
     const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
     if(error) alert("Error: " + error.message);
     else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
-});
-
-// Wait for DOM before initializing
-window.addEventListener('DOMContentLoaded', () => {
-    checkUserSession();
 });
