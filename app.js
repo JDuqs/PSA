@@ -1032,11 +1032,11 @@ document.getElementById('btnExportAckReceipt')?.addEventListener('click', () => 
 
         return [
             index + 1,
-            item.borrower || "_________________",
+            "", // Name of Hired Based Personnel (Left Blank as requested)
             (item.description && item.description.toLowerCase().includes('samsung')) ? "Samsung" : (item.description || ""),
             item.serial,
             item.asset_no || "",
-            "", // Tag (Empty in sample)
+            // Tag Column REMOVED
             accessories,
             "", // Signature (Empty)
             ""  // Date (Empty)
@@ -1051,8 +1051,7 @@ document.getElementById('btnExportAckReceipt')?.addEventListener('click', () => 
             "Name of Hired\nBased Personnel", 
             "Tablet Brand", 
             "Serial Number", 
-            "Asset\nNumber", 
-            "Tag", 
+            "Asset Tag\nNumber", 
             "With Powerbank\nand/or Accessories", 
             "Signature", 
             "Date of\nAcknowledgement"
@@ -1081,11 +1080,11 @@ document.getElementById('btnExportAckReceipt')?.addEventListener('click', () => 
             1: { width: 35 }, // Name
             2: { width: 20 }, // Brand
             3: { width: 25 }, // Serial
-            4: { width: 15, halign: 'center' }, // Asset
-            5: { width: 10 }, // Tag
-            6: { width: 25, fontSize: 7 }, // Accessories
-            7: { width: 25 }, // Signature
-            8: { width: 20 }  // Date
+            4: { width: 20, halign: 'center' }, // Asset Tag Number (Slightly wider)
+            // Tag column removed (index shifted)
+            5: { width: 30, fontSize: 7 }, // Accessories (Wider to compensate)
+            6: { width: 25 }, // Signature
+            7: { width: 20 }  // Date
         },
         didDrawPage: function (data) {
             // Footer on every page
