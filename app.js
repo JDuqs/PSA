@@ -62,28 +62,37 @@ async function checkUserSession() {
     const { data: { session } } = await supabase.auth.getSession();
     const path = window.location.pathname;
 
+    console.log("Checking session. Path:", path);
+
     if (session) {
         currentUser = session.user; 
+        console.log("User logged in:", currentUser.email);
         
-        if (path.includes('index.html') || path.includes('signup.html') || path.endsWith('/')) {
+        // Redirect from public pages to dashboard
+        if (path.includes('index.html') || path.includes('signup.html') || path === '/' || path.endsWith('/')) {
             window.location.href = 'dashboard.html';
             return;
         }
         
-        if (path.includes('dashboard.html')) {
+        // Initialize Dashboard Logic
+        if (path.includes('dashboard')) {
             initDashboard(currentUser);
         }
 
-        if (path.includes('admin.html')) {
+        // Initialize Admin Logic
+        if (path.includes('admin')) {
             if (currentUser.email !== ADMIN_EMAIL) {
+                // Not admin? Kick to dashboard
                 window.location.href = 'dashboard.html';
             } else {
+                // Is admin? Load data
                 loadRegistrationRequests();
             }
         }
 
     } else {
-        if (path.includes('dashboard.html') || path.includes('admin.html')) {
+        // No Session - Kick to login if on protected pages
+        if (path.includes('dashboard') || path.includes('admin')) {
             window.location.href = 'index.html';
         }
     }
@@ -144,8 +153,6 @@ if (logoutBtn) {
     });
 }
 
-checkUserSession();
-
 // ==========================================
 // B. REGISTRATION & APPROVAL
 // ==========================================
@@ -155,7 +162,6 @@ const signupForm = document.getElementById('signupForm');
 async function handleSignup(e) {
     if (e) e.preventDefault();
     
-    // Updated Logic for Split Name and Password Confirmation
     const firstName = document.getElementById('regFirstName').value.trim();
     const lastName = document.getElementById('regLastName').value.trim();
     const email = document.getElementById('regEmail').value.toLowerCase().trim();
@@ -163,16 +169,10 @@ async function handleSignup(e) {
     const passConfirm = document.getElementById('regPassConfirm').value;
 
     if (!firstName || !lastName || !email) return alert("Please fill all details.");
-    
     if (pass.length < 6) return alert("Password must be at least 6 characters.");
+    if (pass !== passConfirm) return alert("Passwords do not match! Please check and try again.");
     
-    if (pass !== passConfirm) {
-        return alert("Passwords do not match! Please check and try again.");
-    }
-    
-    // Combine names
     const name = `${firstName} ${lastName}`;
-
     const btn = document.getElementById('requestBtn');
     if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
 
@@ -211,11 +211,17 @@ if (signupForm) signupForm.addEventListener('submit', handleSignup);
 async function loadRegistrationRequests() {
     const tbody = document.getElementById('requestTableBody');
     const section = document.getElementById('adminRequestSection');
-    if (!tbody || !section) return;
+    
+    // Safety Check: If we are not on the admin page, do nothing
+    if (!tbody) {
+        console.warn("loadRegistrationRequests called, but requestTableBody not found. (Not on admin.html?)");
+        return;
+    }
 
-    section.style.display = 'block';
+    if(section) section.style.display = 'block';
 
     const fetchRequests = async () => {
+        console.log("Fetching registration requests...");
         try {
             const { data, error } = await supabase.from('registration_requests').select('*');
             if (error) throw error;
@@ -239,7 +245,7 @@ async function loadRegistrationRequests() {
             });
         } catch (err) {
             console.error("Error loading requests:", err);
-            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger py-3'>Error loading requests.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger py-3'>Error loading requests. Check console.</td></tr>`;
         }
     };
 
@@ -258,7 +264,6 @@ window.approveUser = async (reqId, email, name, password) => {
 
         await supabase.from('registration_requests').delete().eq('id', reqId);
         alert("User Approved! Refreshing...");
-        // FORCE RELOAD TO UPDATE UI STATE CLEANLY
         window.location.reload(); 
     } catch (e) { alert(e.message); }
 };
@@ -268,7 +273,6 @@ window.cancelRequest = async (id) => {
         try {
             await supabase.from('registration_requests').delete().eq('id', id);
             alert("Request rejected.");
-            // FORCE RELOAD TO UPDATE UI STATE CLEANLY
             window.location.reload();
         } catch (e) { alert(e.message); }
     }
@@ -278,24 +282,19 @@ window.cancelRequest = async (id) => {
 // C. DASHBOARD INITIALIZATION
 // ==========================================
 async function initDashboard(user) {
+    console.log("Initializing Dashboard for:", user.email);
     const borrowerInput = document.getElementById('borrower');
     
-    // Safety check for user.email
-    if (!user || !user.email) {
-        console.error("User object missing in initDashboard");
-        return;
-    }
+    if (!user || !user.email) return;
 
     try {
         const { data: userProfile } = await supabase.from('users').select('name').eq('email', user.email).single();
         if (userProfile) currentUserName = userProfile.name;
         else currentUserName = user.email.split('@')[0];
     } catch (e) {
-        console.warn("Could not fetch user profile, using email fallback.");
         currentUserName = user.email.split('@')[0];
     }
 
-    // Update User Indicator on Dashboard
     const userDisplay = document.getElementById('currentUserDisplay');
     if (userDisplay) {
         userDisplay.innerHTML = `<i class="fa fa-circle-user me-2" style="color: var(--psa-yellow);"></i><span class="fw-bold">${currentUserName}</span>`;
@@ -307,15 +306,14 @@ async function initDashboard(user) {
         if (adminBtn) adminBtn.style.display = 'inline-block';
         if (bulkNav) bulkNav.style.display = 'block';
         
-        if (window.location.href.includes('admin.html')) loadRegistrationRequests();
-        
         if (borrowerInput) {
             borrowerInput.readOnly = false;
             borrowerInput.style.backgroundColor = '#fff';
             borrowerInput.placeholder = "Enter Borrower's Name";
         }
     } else {
-        if (window.location.href.includes('admin.html')) {
+        // Prevent non-admin accessing admin features via URL hacking
+        if (window.location.href.includes('admin')) {
             window.location.href = 'dashboard.html';
             return;
         }
@@ -358,7 +356,7 @@ document.getElementById('addToCartBtn')?.addEventListener('click', () => {
     if (cart.some(i => i.serial === s)) return alert("Already in list");
 
     if (borrowedSerials.has(s)) {
-        return alert(`Item ${s} is currently MARKED AS OUT in the system. It must be returned first.`);
+        return alert(`Item ${s} is currently MARKED AS OUT. Return it first.`);
     }
 
     cart.push({ serial: s, property_no: p, desc: d, asset: a });
@@ -393,7 +391,7 @@ document.getElementById('issueBtn')?.addEventListener('click', async () => {
     const proj = document.getElementById('project').value;
     const due = document.getElementById('dueDate').value;
 
-    if (!borrower || !guard || !dest || !due) return alert("Fill all required fields including Due Date");
+    if (!borrower || !guard || !dest || !due) return alert("Fill all required fields.");
 
     for (const item of cart) {
         const { data } = await supabase.from('gate_passes').select('*').eq('serial', item.serial).eq('status', 'OUT');
@@ -404,7 +402,6 @@ document.getElementById('issueBtn')?.addEventListener('click', async () => {
 
     try {
         const { data: { user } } = await supabase.auth.getUser();
-        // Generate ONE ID per transaction so they group properly
         const batchID = generateGatePassID();
         
         const records = cart.map(item => ({
@@ -488,23 +485,28 @@ function loadAllRecords(user) {
     const isAdmin = user.email === ADMIN_EMAIL;
     
     const fetchRecords = async () => {
-        const today = new Date().toISOString().split('T')[0];
+        console.log("Fetching records...");
         
-        let query = supabase.from('gate_passes').select('*').eq('status', 'OUT').order('time_out', { ascending: false }).limit(1000);
-        if (!isAdmin) query = query.eq('issuer_email', user.email);
-        const { data: aData } = await query;
-        if(aData) activeData = aData;
+        try {
+            let query = supabase.from('gate_passes').select('*').eq('status', 'OUT').order('time_out', { ascending: false }).limit(1000);
+            if (!isAdmin) query = query.eq('issuer_email', user.email);
+            const { data: aData, error: aError } = await query;
+            if (aError) throw aError;
+            if(aData) activeData = aData;
 
-        let hQuery = supabase.from('gate_passes').select('*').eq('status', 'RETURNED').order('time_return', { ascending: false }).limit(1000);
-        if (!isAdmin) hQuery = hQuery.eq('issuer_email', user.email);
-        const { data: hData } = await hQuery;
-        if(hData) historyData = hData;
+            let hQuery = supabase.from('gate_passes').select('*').eq('status', 'RETURNED').order('time_return', { ascending: false }).limit(1000);
+            if (!isAdmin) hQuery = hQuery.eq('issuer_email', user.email);
+            const { data: hData, error: hError } = await hQuery;
+            if (hError) throw hError;
+            if(hData) historyData = hData;
 
-        renderTable('active');
-        renderTable('history');
+            renderTable('active');
+            renderTable('history');
+        } catch (e) {
+            console.error("Error fetching records:", e);
+        }
     };
 
-    // UPDATED: Refresh both tables AND the inventory/borrowed status when called
     window.refreshTableData = () => {
         fetchRecords();
         updateBorrowedStatus();
@@ -1322,4 +1324,9 @@ document.getElementById('saveBulkBtn')?.addEventListener('click', async () => {
     const { error } = await supabase.from('inventory').upsert(bulkImportData, { onConflict: 'serial' });
     if(error) alert("Error: " + error.message);
     else { alert("Imported!"); bulkImportData = []; document.getElementById('importPreview').style.display='none'; }
+});
+
+// Wait for DOM before initializing
+window.addEventListener('DOMContentLoaded', () => {
+    checkUserSession();
 });
