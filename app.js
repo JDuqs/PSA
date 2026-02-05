@@ -510,6 +510,7 @@ function loadAllRecords(user) {
             if (hError) throw hError;
             if(hData) historyData = hData;
 
+            // Initially render both
             renderTable('active');
             renderTable('history');
         } catch (e) { console.error("Error fetching records:", e); }
@@ -685,6 +686,7 @@ document.getElementById('returnBtn')?.addEventListener('click', async () => {
 
     await supabase.from('gate_passes').update({ status: 'RETURNED', guard_in: g, time_return: new Date().toISOString() }).eq('id', data.id);
     document.getElementById('returnSerial').value="";
+    // Updated refresh call
     if(window.refreshTableData) window.refreshTableData();
 });
 window.selectRow = (s) => document.getElementById('returnSerial').value = s;
