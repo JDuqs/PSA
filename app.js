@@ -137,7 +137,6 @@ async function handleLogin(e) {
 
     try {
         // 1. AUTHENTICATE FIRST (Changed Order for RLS)
-        // We must log in first so Supabase knows who we are before checking the 'users' table
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         
         if (error) {
@@ -150,40 +149,28 @@ async function handleLogin(e) {
         // 2. CHECK APPROVAL STATUS (Now that we are logged in)
         if (email !== ADMIN_EMAIL) {
             // UPDATED: Use UID for lookup instead of email. 
-            // RLS policies usually enforce "auth.uid() = uid", so fetching by UID is safer.
             const { data: userData, error: userError } = await supabase
                 .from('users')
                 .select('*') 
-                .eq('uid', data.user.id) // <--- Changed from email to uid
+                .eq('uid', data.user.id)
                 .single();
             
             // If the user is not in our custom 'users' table or not approved
             if (userError || !userData || userData.approved !== true) {
-                // Force logout immediately
                 await supabase.auth.signOut();
-                
                 if (userError || !userData) throw new Error("Account setup incomplete. Please contact Admin.");
                 if (userData.approved !== true) throw new Error("Access Denied: Pending Admin approval.");
             }
         }
 
         // --- SINGLE SESSION ENFORCEMENT START ---
-        // 1. Generate unique session token
         const sessionToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
-        
-        // 2. Update 'users' table with this token
-        // Use UID for reliability (RLS Compatible)
         const { error: updateError } = await supabase
             .from('users')
             .update({ session_token: sessionToken })
             .eq('uid', data.user.id); 
 
-        if (updateError) {
-            // Fallback only if absolutely necessary, but UID should work
-            console.warn("Session Update error:", updateError);
-        }
-        
-        // 3. Store locally to identify this device
+        if (updateError) console.warn("Session Update error:", updateError);
         localStorage.setItem('session_token', sessionToken);
         // --- SINGLE SESSION ENFORCEMENT END ---
 
@@ -199,9 +186,7 @@ async function handleLogin(e) {
         if (msgEl) msgEl.innerText = displayMsg;
         else alert(displayMsg);
         
-        // Ensure we are signed out if we hit an error during the process
         await supabase.auth.signOut();
-
         if(btn) { btn.disabled = false; btn.innerText = "LOGIN TO SYSTEM"; }
     }
 }
@@ -218,7 +203,7 @@ if (logoutBtn) {
 }
 
 // ==========================================
-// B. REGISTRATION & APPROVAL
+// B. REGISTRATION & APPROVAL (HARDENED)
 // ==========================================
 const requestBtn = document.getElementById('requestBtn');
 const signupForm = document.getElementById('signupForm');
@@ -241,28 +226,37 @@ async function handleSignup(e) {
     if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
 
     try {
+        // 1. Create Auth User
         const { data: authData, error: authError } = await supabase.auth.signUp({
             email, password: pass, options: { data: { full_name: name } }
         });
-        if (authError) throw authError;
-
-        // Note: With RLS, 'anon' (unauthenticated) role must have INSERT permission on 'registration_requests'
-        const { error: reqError } = await supabase.from('registration_requests').insert([{ name, email, pass, status: 'PENDING' }]);
         
-        // CRITICAL FIX: If the request table fails (e.g., due to RLS), stop and alert the user.
+        if (authError) {
+            // Ignore "User already registered" so we can retry the DB inserts if they failed previously
+            if (!authError.message.includes("already registered")) throw authError;
+        }
+
+        // 2. Insert into 'registration_requests' (Admin Queue)
+        // NOTE: If RLS is enabled, you MUST have a policy allowing INSERT for 'anon' users
+        const { error: reqError } = await supabase
+            .from('registration_requests')
+            .upsert([{ name, email, pass, status: 'PENDING' }], { onConflict: 'email' });
+        
         if (reqError) {
              console.error("Registration Request Error:", reqError);
-             throw new Error("Registration Failed: " + reqError.message);
+             throw new Error("Registration DB Error: " + reqError.message + " (Check RLS Policies)");
         }
         
-        // Fix: Use .id (Supabase standard) not .uid
-        const userId = authData.user ? authData.user.id : null;
+        // 3. Insert into 'users' (Public Profile)
+        // Use .id if available, otherwise try to fetch it if authData user is null (case: already registered)
+        let userId = authData.user ? authData.user.id : null;
         
-        const { error: userError } = await supabase.from('users').insert([{ 
-            email, name, password: pass, approved: false, role: 'user', uid: userId
-        }]);
+        const { error: userError } = await supabase.from('users')
+            .upsert([{ 
+                email, name, password: pass, approved: false, role: 'user', uid: userId 
+            }], { onConflict: 'email' });
 
-        if (userError) console.error("Profile creation warning:", userError);
+        if (userError) console.error("Profile warning:", userError);
 
         alert("Request submitted! Wait for Admin approval.");
         await supabase.auth.signOut(); 
@@ -272,7 +266,7 @@ async function handleSignup(e) {
         if (error.message.includes("rate limit") || error.status === 429) {
             alert("Signup Limit: Please wait or ask Admin.");
         } else {
-            // Show the actual error (like permission denied)
+            // This will show if RLS blocked the insert
             alert("Error: " + error.message);
         }
         if(btn) { btn.disabled = false; btn.innerText = "SUBMIT ACCESS REQUEST"; }
@@ -286,17 +280,23 @@ async function loadRegistrationRequests() {
     const tbody = document.getElementById('requestTableBody');
     const section = document.getElementById('adminRequestSection');
     
-    if (!tbody) {
-        console.warn("requestTableBody not found. Not on admin page?");
-        return;
-    }
-
+    if (!tbody) return;
     if(section) section.style.display = 'block';
 
     const fetchRequests = async () => {
         try {
-            const { data, error } = await supabase.from('registration_requests').select('*');
-            if (error) throw error;
+            // Fetch pending requests
+            const { data, error } = await supabase
+                .from('registration_requests')
+                .select('*');
+            
+            if (error) {
+                console.error("Fetch error:", error);
+                tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger fw-bold'>
+                    Error: ${error.message} <br> (Admin RLS Policy for SELECT might be missing)
+                </td></tr>`;
+                return;
+            }
             
             tbody.innerHTML = "";
             if (!data || data.length === 0) {
@@ -317,7 +317,7 @@ async function loadRegistrationRequests() {
             });
         } catch (err) {
             console.error("Error loading requests:", err);
-            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger'>Error loading data.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan='4' class='text-center text-danger'>Unexpected Error loading data.</td></tr>`;
         }
     };
 
