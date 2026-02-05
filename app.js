@@ -350,6 +350,7 @@ async function initDashboard(user) {
         loadAllRecords(user);
         loadInventory(); 
         updateClock();
+        initSearchListeners(); // Initialize new search logic
     }
 }
 
@@ -510,7 +511,7 @@ function loadAllRecords(user) {
             if (hError) throw hError;
             if(hData) historyData = hData;
 
-            // Initially render both
+            // Initially render both with empty search
             renderTable('active');
             renderTable('history');
         } catch (e) { console.error("Error fetching records:", e); }
@@ -535,15 +536,22 @@ function renderTable(type) {
     if (!tbody) return;
     
     let filtered = rawData;
-    // FIX: SEARCH FILTER LOGIC
+    
+    // === REVISED SEARCH LOGIC ===
     if (state.filter) {
         const term = state.filter.toLowerCase();
         filtered = rawData.filter(item => {
+            // Prepare formatted dates for search visibility
+            const formattedTimeOut = item.time_out ? new Date(item.time_out).toLocaleString() : '';
+            const formattedTimeReturn = item.time_return ? new Date(item.time_return).toLocaleString() : '';
+            const formattedDueDate = item.due_date ? item.due_date : ''; // usually already string YYYY-MM-DD
+
             // Search visible fields only
             const fields = [
                 item.unique_id, item.borrower, item.description, 
                 item.serial, item.property_no, item.asset_no, 
-                item.destination, item.project, item.guard_out, item.guard_in
+                item.destination, item.project, item.guard_out, item.guard_in,
+                formattedTimeOut, formattedTimeReturn, formattedDueDate, item.status
             ];
             return fields.some(val => val && String(val).toLowerCase().includes(term));
         });
@@ -558,7 +566,7 @@ function renderTable(type) {
     
     tbody.innerHTML = "";
     if (paginatedItems.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3">No records found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3">No records found matching "${state.filter}".</td></tr>`;
     } else {
         const today = new Date().toISOString().split('T')[0];
         const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
@@ -665,14 +673,45 @@ window.updateDueDate = async (id, newDate) => {
     } catch (e) { alert("Update failed: " + e.message); }
 };
 
-document.getElementById('tableSearch')?.addEventListener('input', (e) => {
-    const activeTabButton = document.querySelector('.nav-link.active');
-    const targetId = activeTabButton.getAttribute('data-bs-target');
-    const type = targetId === '#activeTab' ? 'active' : 'history';
-    paginationState[type].filter = e.target.value.toLowerCase();
-    paginationState[type].page = 1; 
-    renderTable(type);
-});
+// === SEARCH LISTENER INITIALIZATION ===
+function initSearchListeners() {
+    // 1. Handle Typing in Search Box
+    const searchBox = document.getElementById('tableSearch');
+    if (searchBox) {
+        searchBox.addEventListener('input', (e) => {
+            const activeTabButton = document.querySelector('.nav-link.active');
+            let type = 'active'; // Default
+            if(activeTabButton) {
+                const targetId = activeTabButton.getAttribute('data-bs-target');
+                // Check if targetId contains 'history', else assume active
+                if(targetId && targetId.includes('history')) {
+                    type = 'history';
+                }
+            }
+            
+            paginationState[type].filter = e.target.value.toLowerCase();
+            paginationState[type].page = 1; 
+            renderTable(type);
+        });
+    }
+
+    // 2. Handle Tab Switching (Sync Search Term)
+    const tabEls = document.querySelectorAll('button[data-bs-toggle="pill"], button[data-bs-toggle="tab"]');
+    tabEls.forEach(tabEl => {
+        tabEl.addEventListener('shown.bs.tab', (event) => {
+            const targetId = event.target.getAttribute('data-bs-target'); // e.g., #activeTab or #historyTab
+            const type = (targetId && targetId.includes('history')) ? 'history' : 'active';
+            
+            // Apply current search term to the new tab immediately
+            if(searchBox) {
+                const currentTerm = searchBox.value.toLowerCase();
+                paginationState[type].filter = currentTerm;
+                paginationState[type].page = 1; 
+            }
+            renderTable(type);
+        });
+    });
+}
 
 document.getElementById('returnBtn')?.addEventListener('click', async () => {
     const s = document.getElementById('returnSerial').value;
